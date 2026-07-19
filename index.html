@@ -8,7 +8,28 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="theme-color" content="#101318">
 <title>字幕分段剪辑</title>
-<script src="https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.11.6/dist/ffmpeg.min.js"></script>
+<script>
+/* ffmpeg 包装器多线路加载：jsdelivr 主站在部分国内网络下极慢甚至断流，自动换源 */
+(function () {
+  window.__cdnBases = [
+    'https://cdn.jsdelivr.net/npm',
+    'https://fastly.jsdelivr.net/npm',
+    'https://testingcf.jsdelivr.net/npm',
+    'https://gcore.jsdelivr.net/npm'
+  ];
+  var i = 0, done = false;
+  function tryNext() {
+    if (done || window.FFmpeg || i >= window.__cdnBases.length) return;
+    var s = document.createElement('script');
+    s.src = window.__cdnBases[i++] + '/@ffmpeg/ffmpeg@0.11.6/dist/ffmpeg.min.js';
+    s.onload = function () { done = true; };
+    s.onerror = function () { tryNext(); };
+    document.head.appendChild(s);
+    setTimeout(function () { if (!done && !window.FFmpeg) tryNext(); }, 20e3);   // 20秒无动静换下一条
+  }
+  tryNext();
+})();
+</script>
 <style>
   :root{
     --bg:#101318; --card:#1a1f27; --card2:#222a35; --line:#2c3542;
@@ -924,20 +945,40 @@ $('btnDoc2').onclick = downloadDoc;
 
 /* ================= ffmpeg 引擎（懒加载，core-st 单线程内核） ================= */
 let ff = null, ffLoading = null, ffLogs = [];
+const FF_CORE_FILE = '/@ffmpeg/core-st@0.11.1/dist/ffmpeg-core.js';
+function ffCoreUrls() {   // 多线路引擎内核；上次成功的线路排最前
+  const urls = (window.__cdnBases || ['https://cdn.jsdelivr.net/npm']).map(b => b + FF_CORE_FILE);
+  const good = store.get('sc_ff_core', '');
+  if (good && urls.includes(good)) return [good, ...urls.filter(u => u !== good)];
+  return urls;
+}
 async function loadFFmpeg() {
   if (ff && ff.isLoaded()) return ff;
   if (ffLoading) return ffLoading;
   if (!window.FFmpeg) throw new Error('ffmpeg 组件加载失败，请检查网络后刷新页面');
-  ff = FFmpeg.createFFmpeg({
-    log: false,
-    mainName: 'main',   // core-st 必须配 mainName:"main"，否则报 proxy_main 错误
-    corePath: 'https://cdn.jsdelivr.net/npm/@ffmpeg/core-st@0.11.1/dist/ffmpeg-core.js',
-  });
-  try {   // 捕获内核日志，便于排查音轨问题
-    ffLogs = [];
-    ff.setLogger(({ message }) => { if (message) { ffLogs.push(message); if (ffLogs.length > 60) ffLogs.shift(); } });
-  } catch { }
-  ffLoading = ff.load().then(() => { ffLoading = null; return ff; }).catch(e => { ffLoading = null; ff = null; throw e; });
+  ffLoading = (async () => {
+    const urls = ffCoreUrls();
+    let lastErr = null;
+    for (let i = 0; i < urls.length; i++) {
+      // core-st 必须配 mainName:"main"，否则报 proxy_main 错误
+      const inst = FFmpeg.createFFmpeg({ log: false, mainName: 'main', corePath: urls[i] });
+      try {   // 捕获内核日志，便于排查音轨问题
+        ffLogs = [];
+        inst.setLogger(({ message }) => { if (message) { ffLogs.push(message); if (ffLogs.length > 60) ffLogs.shift(); } });
+      } catch { }
+      try {
+        await Promise.race([inst.load(), new Promise((_, rej) => setTimeout(() => rej(new Error('该线路超时')), 60e3))]);
+        ff = inst;
+        store.set('sc_ff_core', urls[i]);   // 记住可用线路，下次免换源
+        return ff;
+      } catch (e) {
+        lastErr = e;
+        try { inst.exit(); } catch { }
+        if (i + 1 < urls.length) mask.set(0.02, `线路 ${i + 1} 不通，换源重试（${i + 2}/${urls.length}）…`);
+      }
+    }
+    throw lastErr || new Error('引擎加载失败');
+  })().then(v => { ffLoading = null; return v; }, e => { ffLoading = null; ff = null; throw e; });
   return ffLoading;
 }
 function resetFFmpeg() { ff = null; ffLoading = null; }
@@ -1045,9 +1086,20 @@ async function probeHost(host, modelId, timeoutMs = 9000) {
     return (e && e.name === 'AbortError') ? '连接超时' : '被拦截或无法连接';
   } finally { clearTimeout(t); }
 }
+let _tfs = null;
+async function loadTfs() {   // transformers.js 多线路加载（识别组件本体）
+  if (_tfs) return _tfs;
+  const bases = window.__cdnBases || ['https://cdn.jsdelivr.net/npm'];
+  let lastErr = null;
+  for (const b of bases) {
+    try { _tfs = await withTimeout(import(b + '/@huggingface/transformers@3.0.2'), 60e3, '识别组件加载超时'); return _tfs; }
+    catch (e) { lastErr = e; console.warn('识别组件线路失败', b, e); }
+  }
+  throw lastErr || new Error('识别组件加载失败');
+}
 async function loadWhisper(modelId, onDlProgress) {
   if (asrPipe && asrModelKey === modelId) return asrPipe;
-  const { pipeline, env } = await import('https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.0.2');
+  const { pipeline, env } = await loadTfs();
   env.useBrowserCache = typeof caches !== 'undefined';  // 模型只下载一次，之后离线可用（非安全上下文自动降级）
   env.allowLocalModels = false;
   const fails = [];
