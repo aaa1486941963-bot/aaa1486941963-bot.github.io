@@ -290,6 +290,12 @@
       <div class="opt" data-m="base">标准版<div class="d">whisper-base · 约80MB 更准</div></div>
     </div>
   </div>
+  <div class="fld">
+    <label>离线模型包（网络下载不了模型时的终极方案，只需导入一次）</label>
+    <input type="file" id="modelPkgInput" accept=".zip,.json,.onnx,.txt" multiple style="display:none">
+    <button id="btnModelPkg" style="width:100%">📦 导入离线模型包（约27MB）</button>
+    <div class="hint" id="modelPkgStatus"></div>
+  </div>
   <div class="hint" id="authInfo"></div>
   <div class="hint">提示：本地识别首次需下载模型（约40MB），建议 Wi-Fi；视频建议 5 分钟以内。</div>
   <button class="primary" id="btnSheetClose" style="width:100%">保存</button>
@@ -426,6 +432,7 @@ function renderSheet() {
   $('profModelNew').value = '';
   $('testStatus').textContent = '';
   $('renameRow').style.display = 'none';
+  renderModelPkgStatus();
   renderModelSel();
   setRadio('whisperRow', whisperTier.get());
   // 密钥信息
@@ -1098,11 +1105,116 @@ async function loadTfs() {   // transformers.js 多线路加载（识别组件�
   }
   throw lastErr || new Error('识别组件加载失败');
 }
+/* ================= 离线模型包（手动导入，永久免下载） ================= */
+const PKG_HOST = 'https://huggingface.co';          // 离线包写入的规范网址（与识别组件请求一致）
+const PKG_TINY_ID = 'Xenova/whisper-tiny';
+const MODEL_FILE_MAP = {                            // 文件名 → 仓库内路径
+  'config.json': 'config.json', 'generation_config.json': 'generation_config.json',
+  'tokenizer.json': 'tokenizer.json', 'tokenizer_config.json': 'tokenizer_config.json',
+  'preprocessor_config.json': 'preprocessor_config.json', 'normalizer.json': 'normalizer.json',
+  'added_tokens.json': 'added_tokens.json', 'special_tokens_map.json': 'special_tokens_map.json',
+  'vocab.json': 'vocab.json', 'merges.txt': 'merges.txt',
+  'encoder_model_quantized.onnx': 'onnx/encoder_model_quantized.onnx',
+  'decoder_model_merged_quantized.onnx': 'onnx/decoder_model_merged_quantized.onnx',
+};
+const PKG_REQUIRED = ['config.json', 'tokenizer.json', 'tokenizer_config.json', 'preprocessor_config.json',
+  'onnx/encoder_model_quantized.onnx', 'onnx/decoder_model_merged_quantized.onnx'];
+const modelPkgReady = () => store.get('sc_model_pkg', null);
+let _jszip = null;
+async function loadJSZip() {   // 解包组件多线路懒加载（仅导入 zip 时需要）
+  if (_jszip || window.JSZip) { _jszip = window.JSZip; return _jszip; }
+  const bases = window.__cdnBases || ['https://cdn.jsdelivr.net/npm'];
+  for (const b of bases) {
+    try {
+      await new Promise((res, rej) => {
+        const s = document.createElement('script');
+        s.src = b + '/jszip@3.10.1/dist/jszip.min.js';
+        s.onload = res; s.onerror = rej;
+        document.head.appendChild(s);
+        setTimeout(() => rej(new Error('timeout')), 20e3);
+      });
+      _jszip = window.JSZip; return _jszip;
+    } catch { }
+  }
+  throw new Error('解包组件加载失败，请检查网络后重试');
+}
+async function importModelPackage(fileList) {
+  const files = [...fileList];
+  if (!files.length) return;
+  if (typeof caches === 'undefined') return toast('当前浏览器不支持离线存储，无法导入');
+  const st = $('modelPkgStatus');
+  const setSt = t => { st.textContent = t; };
+  // ① 收集 {仓库路径 → Blob}
+  const entries = new Map();
+  if (files.length === 1 && /\.zip$/i.test(files[0].name)) {
+    setSt('正在解压模型包…');
+    const JZ = await loadJSZip();
+    const zip = await JZ.loadAsync(files[0]);
+    for (const name of Object.keys(zip.files)) {
+      const ent = zip.files[name];
+      if (ent.dir) continue;
+      const key = name.toLowerCase().replace(/^\/+/, '');
+      const path = MODEL_FILE_MAP[key] || MODEL_FILE_MAP[key.split('/').pop()];
+      if (path) entries.set(path, await ent.async('blob'));
+    }
+  } else {
+    for (const f of files) {
+      const path = MODEL_FILE_MAP[f.name.toLowerCase()];
+      if (path) entries.set(path, f);
+    }
+  }
+  // ② 校验完整性
+  const missing = PKG_REQUIRED.filter(p => !entries.has(p));
+  if (missing.length) {
+    setSt('❌ 模型包不完整，缺少：' + missing.join('、'));
+    return toast('模型包不完整，请核对后重新导入');
+  }
+  // ③ 写入浏览器仓库（Cache API，识别组件会从这里直接读取）
+  setSt('正在写入浏览器仓库（约43MB，请稍候）…');
+  const cache = await caches.open('transformers-cache');
+  let total = 0;
+  for (const [path, blob] of entries) {
+    await cache.put(`${PKG_HOST}/${PKG_TINY_ID}/resolve/main/${path}`,
+      new Response(blob, { status: 200, headers: { 'Content-Type': 'application/octet-stream' } }));
+    total += blob.size;
+  }
+  store.set('sc_model_pkg', { model: PKG_TINY_ID, files: entries.size, size: total, time: Date.now() });
+  renderModelPkgStatus();
+  toast('✅ 离线模型包导入成功！识别字幕将不再需要联网', 3600);
+}
+function renderModelPkgStatus() {
+  const el = $('modelPkgStatus');
+  if (!el) return;
+  const pkg = modelPkgReady();
+  el.textContent = pkg
+    ? `✅ 已导入离线模型包（${pkg.files} 个文件 / 约 ${Math.round(pkg.size / 1048576)}MB），识别字幕直接使用，无需联网`
+    : '未导入。若「识别字幕」反复提示模型下载失败：向分享者索要模型包（约27MB，网盘/微信传输均可），在此导入一次即可永久离线识别';
+}
+$('btnModelPkg').onclick = () => { $('modelPkgInput').value = ''; $('modelPkgInput').click(); };
+$('modelPkgInput').onchange = async e => {
+  try { await importModelPackage(e.target.files); }
+  catch (err) { console.error(err); $('modelPkgStatus').textContent = '❌ 导入失败：' + (err.message || err); }
+};
+
 async function loadWhisper(modelId, onDlProgress) {
   if (asrPipe && asrModelKey === modelId) return asrPipe;
   const { pipeline, env } = await loadTfs();
   env.useBrowserCache = typeof caches !== 'undefined';  // 模型只下载一次，之后离线可用（非安全上下文自动降级）
   env.allowLocalModels = false;
+  // 离线模型包：用户已手动导入模型文件，跳过全部网络探测，直接从浏览器仓库加载
+  const pkg = modelPkgReady();
+  if (pkg && pkg.model === modelId) {
+    onDlProgress(0, '正在加载离线模型包…');
+    try {
+      env.remoteHost = PKG_HOST;
+      const p = await pipeline('automatic-speech-recognition', modelId, { dtype: 'q8' });
+      asrPipe = p; asrModelKey = modelId;
+      return p;
+    } catch (e) {
+      console.warn('离线模型包加载失败（可能包损坏），改走网络下载', e);
+      localStorage.removeItem('sc_model_pkg');   // 坏包自动作废，下次提示重新导入
+    }
+  }
   const fails = [];
   for (const host of whisperHosts()) {
     const label = hostLabel(host);
@@ -1190,7 +1302,7 @@ async function runASR() {
     const stage = e && e.stage;
     if (stage === 'engine') toast('拼接引擎加载失败（首次约25MB，用于提取音频）：请检查网络后重试', 4600);
     else if (stage === 'extract') toast('音频提取失败：' + (e.message || e) + '。可再点一次「识别字幕」重试（已自动重置引擎）；仍失败请换个视频', 6000);
-    else if (stage === 'model') toast('模型下载失败（' + e.message + '）。可改用「字幕文件」导入现成 .srt，或部署 server.py 中转后重试', 6500);
+    else if (stage === 'model') toast('模型下载失败（' + e.message + '）。终极方案：「接口设置」底部导入离线模型包（向分享者索要，约27MB，导入后永久免下载）；也可改用「字幕文件」导入 .srt', 8000);
     else if (stage === 'infer') toast('识别过程出错：' + (e.message || e), 4600);
     else toast('语音识别失败：' + (e && e.message || e), 4600);
   }
