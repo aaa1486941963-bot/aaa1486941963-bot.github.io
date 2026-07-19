@@ -1,0 +1,1309 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#101318">
+<title>字幕分段剪辑</title>
+<script src="https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.11.6/dist/ffmpeg.min.js"></script>
+<style>
+  :root{
+    --bg:#101318; --card:#1a1f27; --card2:#222a35; --line:#2c3542;
+    --txt:#e8ecf1; --sub:#8b95a5; --blue:#2f7bff; --blue2:#1f5fd6;
+    --green:#22b573; --red:#e05252; --gold:#e8a23d;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;padding:0;background:var(--bg);color:var(--txt);
+    font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+    font-size:16px;line-height:1.5;}
+  body{padding-bottom:calc(84px + env(safe-area-inset-bottom));}
+  #app{max-width:640px;margin:0 auto;padding:12px 12px 0;}
+  header{display:flex;align-items:center;justify-content:space-between;margin:4px 0 12px;}
+  header h1{font-size:20px;margin:0;font-weight:700;}
+  button{font-family:inherit;color:var(--txt);background:var(--card2);border:1px solid var(--line);
+    border-radius:12px;font-size:16px;min-height:46px;padding:8px 14px;cursor:pointer;}
+  button:active{transform:scale(.97);opacity:.85}
+  button:disabled{opacity:.45}
+  button.primary{background:var(--blue);border-color:var(--blue);font-weight:600}
+  button.primary:active{background:var(--blue2)}
+  button.danger{background:var(--red);border-color:var(--red);font-weight:600}
+  button.ghost{background:transparent}
+  .btnRow{display:flex;gap:10px;margin:10px 0;}
+  .btnRow button{flex:1;}
+  #playerWrap{position:relative;background:#000;border-radius:14px;overflow:hidden;min-height:180px;
+    display:flex;align-items:center;justify-content:center;border:1px solid var(--line);}
+  #player{width:100%;max-height:44vh;display:block;background:#000;}
+  #playerHint{position:absolute;inset:0;display:flex;flex-direction:column;gap:12px;align-items:center;
+    justify-content:center;color:var(--sub);background:#0b0d10;text-align:center;padding:16px;}
+  #playerHint .big{font-size:17px;color:var(--txt);}
+  #tabs{display:flex;background:var(--card);border:1px solid var(--line);border-radius:12px;
+    padding:4px;gap:4px;margin:14px 0 10px;position:sticky;top:0;z-index:5;}
+  #tabs button{flex:1;border:none;background:transparent;min-height:42px;font-size:15px;color:var(--sub);border-radius:9px;}
+  #tabs button.on{background:var(--blue);color:#fff;font-weight:600;}
+  .panel{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:10px;min-height:220px;}
+  .row{display:flex;align-items:center;gap:8px;padding:10px 8px;border-bottom:1px solid var(--line);}
+  .row:last-child{border-bottom:none;}
+  .row.picked{background:#232c3a;border-radius:10px;}
+  .row .txt{flex:1;min-width:0;}
+  .row .txt .t{font-size:15.5px;word-break:break-all;}
+  .row .txt .tm{font-size:12.5px;color:var(--sub);margin-top:2px;}
+  .row .sid{color:var(--gold);font-weight:700;margin-right:2px;}
+  .mini{min-height:38px;padding:4px 10px;font-size:14.5px;border-radius:9px;flex:none;}
+  .toolbar{display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap;}
+  .toolbar input[type=text]{flex:1;min-width:120px;background:var(--card2);border:1px solid var(--line);
+    color:var(--txt);border-radius:10px;min-height:42px;padding:6px 10px;font-size:15px;}
+  .pager{display:flex;align-items:center;justify-content:center;gap:14px;padding:10px 0 2px;color:var(--sub);font-size:14.5px;}
+  textarea{width:100%;background:var(--card2);border:1px solid var(--line);color:var(--txt);
+    border-radius:12px;padding:10px;font-size:15px;min-height:120px;font-family:inherit;line-height:1.5;}
+  .statusLine{font-size:14px;color:var(--sub);margin:8px 0;min-height:20px;}
+  .planCard{background:var(--card2);border:1px solid var(--line);border-radius:12px;padding:12px;margin:10px 0;cursor:pointer;}
+  .planCard:active{border-color:var(--blue);}
+  .planCard .head{display:flex;align-items:center;gap:8px;margin-bottom:6px;}
+  .badge{background:var(--blue);color:#fff;font-size:13px;font-weight:700;border-radius:999px;
+    padding:2px 10px;flex:none;}
+  .planCard .title{font-weight:700;font-size:16px;}
+  .planCard .reason{font-size:14px;color:var(--sub);margin:4px 0;}
+  .planCard .meta{font-size:13.5px;color:var(--gold);margin:4px 0;}
+  .planCard .ids{font-size:13px;color:var(--sub);word-break:break-all;}
+  #planBar{display:flex;gap:8px;overflow-x:auto;padding:4px 2px 10px;-webkit-overflow-scrolling:touch;}
+  .capsule{flex:none;border:1px solid var(--line);background:var(--card2);border-radius:999px;
+    padding:7px 14px;font-size:14px;color:var(--txt);white-space:nowrap;min-height:0;cursor:pointer;}
+  .capsule.on{background:var(--blue);border-color:var(--blue);font-weight:600;}
+  #bottomBar{position:fixed;left:0;right:0;bottom:0;z-index:20;background:rgba(16,19,24,.96);
+    backdrop-filter:blur(8px);border-top:1px solid var(--line);
+    padding:10px 12px calc(10px + env(safe-area-inset-bottom));}
+  #bottomBar .inner{max-width:640px;margin:0 auto;display:flex;gap:10px;}
+  #bottomBar button{flex:1;min-height:52px;font-size:17px;}
+  #mask{position:fixed;inset:0;z-index:50;background:rgba(8,10,13,.94);display:none;
+    flex-direction:column;align-items:center;justify-content:center;padding:28px;text-align:center;}
+  #mask .mt{font-size:18px;font-weight:700;margin-bottom:18px;}
+  #mask .barWrap{width:100%;max-width:420px;height:12px;background:var(--card2);border-radius:999px;overflow:hidden;}
+  #mask .bar{height:100%;width:0%;background:var(--blue);border-radius:999px;transition:width .25s;}
+  #mask .pct{font-size:26px;font-weight:700;margin:14px 0 4px;color:var(--blue);}
+  #mask .ms{font-size:14px;color:var(--sub);margin-bottom:26px;min-height:20px;}
+  #sheetMask{position:fixed;inset:0;z-index:40;background:rgba(0,0,0,.55);display:none;}
+  #sheet{position:fixed;left:0;right:0;bottom:0;z-index:41;background:var(--card);
+    border-radius:18px 18px 0 0;border-top:1px solid var(--line);padding:18px 16px calc(18px + env(safe-area-inset-bottom));
+    transform:translateY(105%);transition:transform .28s ease;max-width:640px;margin:0 auto;}
+  #sheet.show{transform:translateY(0);}
+  #sheet h3{margin:0 0 12px;font-size:17px;}
+  .fld{margin-bottom:12px;}
+  .fld label{display:block;font-size:14px;color:var(--sub);margin-bottom:5px;}
+  .fld input{width:100%;background:var(--card2);border:1px solid var(--line);color:var(--txt);
+    border-radius:10px;min-height:44px;padding:6px 12px;font-size:15.5px;}
+  .radioRow{display:flex;gap:8px;}
+  .radioRow .opt{flex:1;border:1px solid var(--line);border-radius:10px;padding:10px;font-size:14.5px;
+    background:var(--card2);cursor:pointer;text-align:center;}
+  .radioRow .opt.on{border-color:var(--blue);background:#1d3050;}
+  .radioRow .opt .d{font-size:12.5px;color:var(--sub);margin-top:2px;}
+  #toast{position:fixed;left:50%;bottom:110px;transform:translateX(-50%);z-index:60;background:#000d;
+    border:1px solid var(--line);color:var(--txt);padding:10px 18px;border-radius:999px;font-size:15px;
+    max-width:86vw;display:none;text-align:center;}
+  .hint{font-size:13px;color:var(--sub);margin:6px 2px;}
+  select{width:100%;background:var(--card2);border:1px solid var(--line);color:var(--txt);
+    border-radius:10px;min-height:44px;padding:6px 10px;font-size:15.5px;font-family:inherit;}
+  .selRow{display:flex;gap:8px;align-items:center;}
+  .selRow select{flex:1;min-width:0;}
+  .selRow .mini{flex:none;}
+  /* 密码锁屏 */
+  #lock{position:fixed;inset:0;z-index:100;background:var(--bg);display:none;
+    flex-direction:column;align-items:center;justify-content:center;padding:28px;}
+  .lockCard{width:100%;max-width:360px;text-align:center;}
+  .lockCard h2{font-size:22px;margin:10px 0 4px;}
+  .lockTip{color:var(--sub);font-size:15px;margin:0 0 18px;}
+  #lockInput{width:100%;background:var(--card2);border:1px solid var(--line);color:var(--txt);
+    border-radius:12px;min-height:52px;padding:8px 14px;font-size:18px;text-align:center;
+    letter-spacing:2px;margin-bottom:12px;}
+  #lockBtn{width:100%;min-height:52px;font-size:17px;}
+  .lockErr{color:var(--red);font-size:14.5px;min-height:22px;margin:10px 0 4px;}
+  .lockHint{color:var(--sub);font-size:13px;line-height:1.7;}
+</style>
+</head>
+<body>
+<div id="lock">
+  <div class="lockCard">
+    <div style="font-size:42px">🔒</div>
+    <h2>字幕分段剪辑</h2>
+    <p class="lockTip">请输入使用密钥</p>
+    <input id="lockInput" type="password" placeholder="请输入密钥" autocomplete="off">
+    <button class="primary" id="lockBtn">解 锁</button>
+    <div class="lockErr" id="lockErr"></div>
+    <div class="lockHint">没有密钥？请联系分享给您的人获取<br>试用密钥有效期 3 天，永久密钥长期有效</div>
+  </div>
+</div>
+<div id="app">
+  <header>
+    <h1>🎬 字幕分段剪辑</h1>
+    <button id="btnSettings" class="ghost">⚙️ 接口设置</button>
+  </header>
+
+  <div id="playerWrap">
+    <video id="player" playsinline webkit-playsinline controls preload="metadata"></video>
+    <div id="playerHint">
+      <div class="big">还没有视频</div>
+      <div>点击下方「选择视频」导入带货/口播视频<br>导入后会自动在本地识别字幕</div>
+      <button id="btnDemo" class="primary">▶ 先看看演示</button>
+    </div>
+  </div>
+
+  <div class="btnRow">
+    <button id="btnPick">🎬 选择视频</button>
+    <button id="btnASR">🎙 识别字幕</button>
+  </div>
+  <div class="btnRow">
+    <button id="btnSrt">📄 字幕文件</button>
+    <button id="btnDoc">⬇ 文档</button>
+  </div>
+  <input type="file" id="fileVideo" accept="video/*" hidden>
+  <input type="file" id="fileSrt" accept=".srt,.txt,text/plain" hidden>
+
+  <nav id="tabs">
+    <button data-tab="subs" class="on">字幕素材 <span id="cntSubs">0</span></button>
+    <button data-tab="picks">预选片段 <span id="cntPicks">0</span></button>
+    <button data-tab="ai">AI方案</button>
+  </nav>
+
+  <main>
+    <section id="tabSubs" class="panel">
+      <div class="toolbar">
+        <input type="text" id="batchIds" placeholder="序号批量添加，如 1,3,5,8">
+        <button class="mini primary" id="btnBatchAdd">添加</button>
+      </div>
+      <div id="subsList"></div>
+      <div class="pager" id="subsPager"></div>
+    </section>
+
+    <section id="tabPicks" class="panel" style="display:none">
+      <div id="planBarWrap" style="display:none">
+        <div class="hint">AI 方案（点一下整套替换预选）：</div>
+        <div id="planBar"></div>
+      </div>
+      <div class="toolbar">
+        <button class="mini" id="btnClearPicks">清空预选列表</button>
+        <button class="mini" id="btnExportPicks">导出片段文本</button>
+      </div>
+      <div id="picksList"></div>
+    </section>
+
+    <section id="tabAI" class="panel" style="display:none">
+      <div class="hint">提示词（会自动保存）：</div>
+      <textarea id="promptBox" placeholder="例如：挑出最适合做带货短视频的片段，给5个方案，每个10段左右，优先保留卖点、价格、使用效果。"></textarea>
+      <div class="btnRow" style="margin-top:10px">
+        <button id="btnGen" class="primary">✨ AI 生成方案</button>
+      </div>
+      <div class="statusLine" id="aiStatus"></div>
+      <div class="btnRow">
+        <button id="btnCopyAll">复制提示词+字幕</button>
+        <button id="btnDoc2">⬇ 文档</button>
+      </div>
+      <div id="plansList"></div>
+    </section>
+  </main>
+</div>
+
+<div id="bottomBar">
+  <div class="inner">
+    <button id="btnPreview" class="primary">▶ 拼接预览</button>
+    <button id="btnExport" class="primary">⬇ 导出成片</button>
+  </div>
+</div>
+
+<div id="mask">
+  <div class="mt" id="maskTitle">处理中</div>
+  <div class="barWrap"><div class="bar" id="maskBar"></div></div>
+  <div class="pct" id="maskPct">0%</div>
+  <div class="ms" id="maskSub"></div>
+  <button class="danger" id="maskAbort">✕ 终止任务</button>
+</div>
+
+<div id="sheetMask"></div>
+<div id="sheet">
+  <h3>⚙️ 接口设置</h3>
+  <div class="fld">
+    <label>配置（选中哪套就默认用哪套）</label>
+    <div class="selRow">
+      <select id="profSelect"></select>
+      <button class="mini" id="btnProfAdd">＋新增</button>
+      <button class="mini" id="btnProfDel">删除</button>
+    </div>
+  </div>
+  <div class="fld">
+    <label>协议</label>
+    <select disabled><option>OpenAI 兼容（DeepSeek / Kimi / 通义 / 智谱等绝大多数）</option></select>
+  </div>
+  <div class="fld">
+    <label>API Key（只保存在您自己手机浏览器里）</label>
+    <input id="profKey" type="password" placeholder="sk-..." autocapitalize="off" autocorrect="off">
+  </div>
+  <div class="fld">
+    <label>接口地址</label>
+    <input id="profUrl" type="text" placeholder="https://api.deepseek.com/v1" autocapitalize="off" autocorrect="off">
+  </div>
+  <div class="fld">
+    <label>模型（下拉选择，选中的即用于 AI 方案）</label>
+    <div class="selRow">
+      <select id="profModelSel"></select>
+      <button class="mini" id="btnModelDel">删除此模型</button>
+    </div>
+  </div>
+  <div class="fld">
+    <label>添加模型（输入模型名 → 点「验证连接」，成功自动加入下拉列表）</label>
+    <input id="profModelNew" type="text" placeholder="如 deepseek-chat / kimi-k3 / qwen-plus" autocapitalize="off" autocorrect="off">
+  </div>
+  <button id="btnTestApi" style="width:100%;margin-bottom:8px">🔌 验证连接</button>
+  <div class="statusLine" id="testStatus"></div>
+  <div class="fld">
+    <label>本地识别模型（浏览器本地运行，免费）</label>
+    <div class="radioRow" id="whisperRow">
+      <div class="opt" data-m="tiny">极速版<div class="d">whisper-tiny · 约40MB</div></div>
+      <div class="opt" data-m="base">标准版<div class="d">whisper-base · 约80MB 更准</div></div>
+    </div>
+  </div>
+  <div class="hint" id="authInfo"></div>
+  <div class="hint">提示：本地识别首次需下载模型（约40MB），建议 Wi-Fi；视频建议 5 分钟以内。</div>
+  <button class="primary" id="btnSheetClose" style="width:100%">保存</button>
+</div>
+
+<div id="toast"></div>
+
+<script type="module">
+'use strict';
+/* ================= 工具函数 ================= */
+const $ = id => document.getElementById(id);
+const pad = (n, l = 2) => String(n).padStart(l, '0');
+const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const clamp01 = v => Math.max(0, Math.min(1, v));
+const charsLen = s => [...s].length;
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+function fmtT(s) { // mm:ss.d
+  s = Math.max(0, +s || 0);
+  const m = Math.floor(s / 60), r = s - m * 60;
+  return pad(m) + ':' + (r < 10 ? '0' : '') + r.toFixed(1);
+}
+function fmtSRT(s) { // HH:MM:SS,mmm
+  s = Math.max(0, +s || 0);
+  const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), sec = Math.floor(s % 60), ms = Math.round((s % 1) * 1000);
+  return `${pad(h)}:${pad(m)}:${pad(sec)},${pad(ms, 3)}`;
+}
+function tsToSec(t) {
+  const m = t.replace(',', '.').match(/(\d+):(\d+):(\d+(?:\.\d+)?)/);
+  return m ? (+m[1]) * 3600 + (+m[2]) * 60 + (+m[3]) : 0;
+}
+function fmtDur(s) { // X分XX秒
+  s = Math.round(s);
+  return `${Math.floor(s / 60)}分${pad(s % 60)}秒`;
+}
+function downloadBlob(blob, name) {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 8000);
+}
+function downloadText(text, name) {
+  downloadBlob(new Blob([text], { type: 'text/plain;charset=utf-8' }), name);
+}
+
+/* ================= 全局状态 ================= */
+const S = {
+  videoBlob: null, videoURL: null, videoName: '', videoSeq: 0,
+  subs: [],          // {id, start, end, text}
+  picks: [],         // 字幕 id 的有序数组
+  plans: [],         // [{title, reason, ids:[]}]
+  page: 1,
+  busy: null,        // 'asr' | 'ai' | 'concat'
+};
+const PER_PAGE = 50;
+const store = {
+  get(k, d) { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch { return d; } },
+  set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch { } },
+};
+/* ================= 接口配置（多套，内置 DeepSeek） ================= */
+function defaultProfiles() {
+  return { active: 0, list: [{ name: 'DeepSeek', url: 'https://api.deepseek.com/v1', key: '', models: ['deepseek-v4-flash', 'deepseek-v4-pro'], model: 'deepseek-v4-flash' }] };
+}
+let profiles = store.get('sc_profiles', null);
+if (!profiles || !Array.isArray(profiles.list) || !profiles.list.length) {
+  profiles = defaultProfiles();
+  const old = store.get('sc_cfg', null);   // 迁移旧版配置
+  if (old && (old.url || old.key))
+    profiles.list.push({ name: '配置2', url: old.url || '', key: old.key || '', models: old.model ? [old.model] : [], model: old.model || '' });
+  store.set('sc_profiles', profiles);
+}
+const saveProfiles = () => store.set('sc_profiles', profiles);
+const prof = () => profiles.list[Math.min(profiles.active, profiles.list.length - 1)];
+const whisperTier = { get: () => store.get('sc_whisper', 'tiny'), set: v => store.set('sc_whisper', v) };
+
+/* ================= Toast ================= */
+let toastTimer = null;
+function toast(msg, ms = 2600) {
+  const el = $('toast');
+  el.textContent = msg;
+  el.style.display = 'block';
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.style.display = 'none', ms);
+}
+
+/* ================= 任务遮罩 ================= */
+let abortFn = null;
+const mask = {
+  open(title, onAbort) {
+    $('maskTitle').textContent = title;
+    $('maskSub').textContent = '';
+    this.set(0);
+    abortFn = onAbort || null;
+    $('maskAbort').style.display = onAbort ? '' : 'none';
+    $('mask').style.display = 'flex';
+  },
+  set(p, sub) {
+    $('maskBar').style.width = (p * 100).toFixed(1) + '%';
+    $('maskPct').textContent = Math.round(p * 100) + '%';
+    if (sub != null) $('maskSub').textContent = sub;
+  },
+  close() { $('mask').style.display = 'none'; abortFn = null; },
+};
+$('maskAbort').onclick = () => { if (abortFn) abortFn(); };
+
+function taskGuard() {
+  if (!S.busy) return false;
+  const name = { asr: '语音识别', ai: 'AI 生成', concat: '视频拼接' }[S.busy] || '任务';
+  toast(`正在执行「${name}」，请先终止或等待完成`);
+  return true;
+}
+
+/* ================= 设置弹层 ================= */
+function setRadio(rowId, val) {
+  $(rowId).querySelectorAll('.opt').forEach(o => o.classList.toggle('on', o.dataset.m === val));
+}
+function renderSheet() {
+  $('profSelect').innerHTML = profiles.list.map((p, i) =>
+    `<option value="${i}"${i === profiles.active ? ' selected' : ''}>${esc(p.name)}</option>`).join('');
+  const p = prof();
+  $('profUrl').value = p.url;
+  $('profKey').value = p.key;
+  $('profModelNew').value = '';
+  $('testStatus').textContent = '';
+  renderModelSel();
+  setRadio('whisperRow', whisperTier.get());
+  // 密钥信息
+  const a = authState();
+  if (a && a.type === 'trial') {
+    const left = LOCK.trialDays * 864e5 - (Date.now() - a.start);
+    const d = Math.floor(left / 864e5), h = Math.floor(left % 864e5 / 36e5);
+    $('authInfo').textContent = `当前为试用密钥：剩余 ${d} 天 ${h} 小时，到期后需输入永久密钥`;
+  } else $('authInfo').textContent = '当前为永久密钥';
+}
+function renderModelSel() {
+  const p = prof();
+  $('profModelSel').innerHTML = p.models.length
+    ? p.models.map(m => `<option${m === p.model ? ' selected' : ''}>${esc(m)}</option>`).join('')
+    : '<option value="">（请先添加模型）</option>';
+}
+function openSheet() { renderSheet(); $('sheet').classList.add('show'); $('sheetMask').style.display = 'block'; }
+function closeSheet() { $('sheet').classList.remove('show'); $('sheetMask').style.display = 'none'; }
+$('btnSettings').onclick = openSheet;
+$('btnSheetClose').onclick = closeSheet;
+$('sheetMask').onclick = closeSheet;
+$('whisperRow').querySelectorAll('.opt').forEach(o => o.onclick = () => {
+  whisperTier.set(o.dataset.m); setRadio('whisperRow', o.dataset.m);
+});
+$('profSelect').onchange = e => { profiles.active = +e.target.value; saveProfiles(); renderSheet(); };
+$('btnProfAdd').onclick = () => {
+  let n = profiles.list.length + 1;
+  while (profiles.list.some(p => p.name === '配置' + n)) n++;
+  profiles.list.push({ name: '配置' + n, url: '', key: '', models: [], model: '' });
+  profiles.active = profiles.list.length - 1;
+  saveProfiles(); renderSheet();
+  toast('已新增配置，请填写接口地址和 Key');
+};
+$('btnProfDel').onclick = () => {
+  if (profiles.list.length <= 1) return toast('至少保留一套配置');
+  if (!confirm(`确定删除「${prof().name}」吗？`)) return;
+  profiles.list.splice(profiles.active, 1);
+  profiles.active = 0;
+  saveProfiles(); renderSheet();
+};
+$('profUrl').oninput = e => { prof().url = e.target.value.trim(); saveProfiles(); };
+$('profKey').oninput = e => { prof().key = e.target.value.trim(); saveProfiles(); };
+$('profModelSel').onchange = e => { prof().model = e.target.value; saveProfiles(); };
+$('btnModelDel').onclick = () => {
+  const p = prof();
+  if (!p.model) return toast('当前没有选中模型');
+  p.models = p.models.filter(m => m !== p.model);
+  p.model = p.models[0] || '';
+  saveProfiles(); renderModelSel();
+  toast('已删除该模型');
+};
+/* 验证连接：成功且是新模型名时自动加入下拉列表 */
+async function testEndpoint(url, key, model) {
+  const base = url.replace(/\/+$/, '');
+  const endpoint = /\/chat\/completions$/.test(base) ? base : base + '/chat/completions';
+  let resp;
+  try {
+    resp = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + key },
+      body: JSON.stringify({ model, messages: [{ role: 'user', content: 'hi' }] }),
+    });
+  } catch { return '❌ 跨域或网络失败：该接口不允许浏览器直连或无法连接'; }
+  if (resp.ok) return '✅ 连接成功';
+  const t = (await resp.text().catch(() => '')).replace(/\s+/g, ' ').slice(0, 80);
+  if (resp.status === 401) return '❌ Key 无效（401）：Key 与接口地址不配对';
+  if (resp.status === 404) return '⚠️ Key 有效，但接口或模型不存在（404）';
+  if (resp.status === 429) return '⚠️ 接口限流（429）：稍等 1 分钟再试';
+  return `⚠️ HTTP ${resp.status}：${t}`;
+}
+$('btnTestApi').onclick = async () => {
+  const url = $('profUrl').value.trim(), key = $('profKey').value.trim();
+  const newName = $('profModelNew').value.trim();
+  const model = newName || $('profModelSel').value;
+  const st = $('testStatus');
+  if (!url || !key) { st.textContent = '请先填写接口地址和 API Key'; return; }
+  if (!model) { st.textContent = '请先输入或选择模型名'; return; }
+  const btn = $('btnTestApi');
+  btn.disabled = true;
+  st.textContent = `正在验证 ${model} …`;
+  try {
+    const r = await testEndpoint(url, key, model);
+    if (r === '✅ 连接成功' && newName && !prof().models.includes(newName)) {
+      prof().models.push(newName);
+      prof().model = newName;
+      saveProfiles(); renderModelSel();
+      st.textContent = `✅ 连接成功，已把 ${newName} 加入模型列表`;
+    } else st.textContent = r;
+  } finally { btn.disabled = false; }
+};
+
+/* ================= 视频加载 ================= */
+const player = $('player');
+let segStopAt = null;
+player.addEventListener('timeupdate', () => {
+  if (segStopAt != null && player.currentTime >= segStopAt) { player.pause(); segStopAt = null; }
+});
+function setVideoSource(blob, name) {
+  if (S.videoURL) URL.revokeObjectURL(S.videoURL);
+  S.videoBlob = blob;
+  S.videoURL = URL.createObjectURL(blob);
+  S.videoName = name;
+  S.videoSeq++;
+  player.src = S.videoURL;
+  $('playerHint').style.display = 'none';
+  // 换新视频：自动清空旧字幕 / 预选 / 方案（序号防错位）
+  S.subs = []; S.picks = []; S.plans = []; S.page = 1;
+  renderAll();
+}
+function setSubs(list, tip) {
+  S.subs = list.map((s, i) => ({ id: i + 1, start: s.start, end: s.end, text: s.text }));
+  S.picks = []; S.plans = []; S.page = 1;   // 换字幕立即作废旧预选与 AI 方案
+  renderAll();
+  if (tip) toast(tip);
+}
+$('fileVideo').onchange = e => {
+  const f = e.target.files[0];
+  e.target.value = '';
+  if (!f) return;
+  if (S.busy && S.busy !== 'asr') return toast('正在执行其他任务，请先终止或等待完成');
+  if (S.busy === 'asr') abortASR();
+  setVideoSource(f, f.name);
+  toast(`已导入「${f.name}」，即将自动识别字幕…`);
+  const seq = S.videoSeq;
+  setTimeout(() => {   // 稍等 0.5 秒再触发自动识别
+    if (seq === S.videoSeq && !S.subs.length && !S.busy) runASR();
+  }, 500);
+};
+$('btnPick').onclick = () => $('fileVideo').click();
+
+/* ================= SRT 解析 ================= */
+function parseSRT(txt) {
+  txt = txt.replace(/^\uFEFF/, '').replace(/\r/g, '');
+  const out = [];
+  for (const block of txt.split(/\n\s*\n/)) {
+    const lines = block.trim().split('\n').map(l => l.trim()).filter(Boolean);
+    if (!lines.length) continue;
+    let i = /^\d+$/.test(lines[0]) ? 1 : 0;
+    const m = lines[i] && lines[i].match(/(\d{1,2}:\d{2}:\d{2}[,.]\d{1,3})\s*-->\s*(\d{1,2}:\d{2}:\d{2}[,.]\d{1,3})/);
+    if (!m) continue;
+    const text = lines.slice(i + 1).join(' ').trim();
+    if (!text) continue;
+    out.push({ start: tsToSec(m[1]), end: tsToSec(m[2]), text });
+  }
+  return out;
+}
+$('fileSrt').onchange = async e => {
+  const f = e.target.files[0];
+  e.target.value = '';
+  if (!f) return;
+  if (S.busy && S.busy !== 'asr') return toast('正在执行其他任务，请先终止或等待完成');
+  if (S.busy === 'asr') abortASR();          // 导入时若正在识别则取消识别
+  try {
+    const txt = await f.text();
+    const list = parseSRT(txt);
+    if (!list.length) return toast('没解析到字幕，请确认是标准 .srt 格式', 3200);
+    setSubs(list, `已导入 ${list.length} 条字幕`);
+    switchTab('subs');
+  } catch { toast('字幕文件读取失败'); }
+};
+$('btnSrt').onclick = () => $('fileSrt').click();
+
+/* ================= Tab 切换 ================= */
+function switchTab(t) {
+  document.querySelectorAll('#tabs button').forEach(b => b.classList.toggle('on', b.dataset.tab === t));
+  $('tabSubs').style.display = t === 'subs' ? '' : 'none';
+  $('tabPicks').style.display = t === 'picks' ? '' : 'none';
+  $('tabAI').style.display = t === 'ai' ? '' : 'none';
+}
+document.querySelectorAll('#tabs button').forEach(b => b.onclick = () => switchTab(b.dataset.tab));
+
+/* ================= 渲染 ================= */
+function subById(id) { return S.subs.find(s => s.id === id); }
+function renderAll() {
+  $('cntSubs').textContent = S.subs.length;
+  $('cntPicks').textContent = S.picks.length;
+  renderSubs(); renderPicks(); renderPlans();
+}
+function renderSubs() {
+  const box = $('subsList'), pager = $('subsPager');
+  if (!S.subs.length) {
+    box.innerHTML = '<div class="hint" style="padding:16px 6px">暂无字幕：导入视频后会自动识别，也可点「字幕文件」导入 .srt。</div>';
+    pager.innerHTML = '';
+    return;
+  }
+  const pages = Math.max(1, Math.ceil(S.subs.length / PER_PAGE));
+  S.page = Math.min(Math.max(1, S.page), pages);
+  const rows = S.subs.slice((S.page - 1) * PER_PAGE, S.page * PER_PAGE);
+  box.innerHTML = rows.map(s => {
+    const picked = S.picks.includes(s.id);
+    return `<div class="row${picked ? ' picked' : ''}" data-id="${s.id}">
+      <div class="txt">
+        <div class="t"><span class="sid">[${s.id}]</span>${esc(s.text)}</div>
+        <div class="tm">${fmtT(s.start)} – ${fmtT(s.end)}</div>
+      </div>
+      <button class="mini act-play" data-id="${s.id}">▶</button>
+      <button class="mini ${picked ? '' : 'primary'} act-add" data-id="${s.id}">${picked ? '✓' : '＋'}</button>
+    </div>`;
+  }).join('');
+  pager.innerHTML = pages > 1
+    ? `<button class="mini" id="pgPrev" ${S.page <= 1 ? 'disabled' : ''}>上一页</button>
+       <span>第 ${S.page} / ${pages} 页</span>
+       <button class="mini" id="pgNext" ${S.page >= pages ? 'disabled' : ''}>下一页</button>` : '';
+  const pv = $('pgPrev'), nx = $('pgNext');
+  if (pv) pv.onclick = () => { S.page--; renderSubs(); };
+  if (nx) nx.onclick = () => { S.page++; renderSubs(); };
+}
+$('subsList').addEventListener('click', e => {
+  const btn = e.target.closest('button');
+  if (!btn) return;
+  const id = +btn.dataset.id;
+  if (btn.classList.contains('act-play')) playSeg(subById(id));
+  else if (btn.classList.contains('act-add')) addPick(id);
+});
+function playSeg(s) {
+  if (!s || !S.videoURL) return;
+  segStopAt = null;
+  player.currentTime = s.start + 0.01;
+  player.play().catch(() => { });
+  segStopAt = s.end;
+}
+function addPick(id) {
+  if (S.picks.includes(id)) { S.picks = S.picks.filter(x => x !== id); }
+  else S.picks.push(id);
+  renderSubs(); renderPicks();
+  $('cntPicks').textContent = S.picks.length;
+}
+$('btnBatchAdd').onclick = () => {
+  const raw = $('batchIds').value.trim();
+  if (!raw) return toast('请先输入序号，如 1,3,5,8');
+  let n = 0;
+  for (const t of raw.split(/[,，、\s]+/)) {
+    const id = parseInt(t, 10);
+    if (id && subById(id) && !S.picks.includes(id)) { S.picks.push(id); n++; }
+  }
+  $('batchIds').value = '';
+  renderSubs(); renderPicks();
+  $('cntPicks').textContent = S.picks.length;
+  toast(n ? `已添加 ${n} 条到预选` : '没有可添加的序号（不存在或已添加）');
+};
+
+/* ================= 预选片段 ================= */
+function planDur(ids) { return ids.reduce((a, id) => { const s = subById(id); return a + (s ? s.end - s.start : 0); }, 0); }
+function activePlanIdx() {
+  return S.plans.findIndex(p => p.ids.length === S.picks.length && p.ids.every((v, i) => v === S.picks[i]));
+}
+function renderPicks() {
+  $('cntPicks').textContent = S.picks.length;
+  const wrap = $('planBarWrap'), bar = $('planBar');
+  if (S.plans.length) {
+    wrap.style.display = '';
+    const act = activePlanIdx();
+    bar.innerHTML = S.plans.map((p, i) =>
+      `<div class="capsule${i === act ? ' on' : ''}" data-i="${i}">方案${i + 1}·${p.ids.length}段·${fmtDur(planDur(p.ids))}</div>`).join('');
+    bar.querySelectorAll('.capsule').forEach(c => c.onclick = () => loadPlan(+c.dataset.i, false));
+  } else wrap.style.display = 'none';
+  const box = $('picksList');
+  if (!S.picks.length) {
+    box.innerHTML = '<div class="hint" style="padding:16px 6px">预选为空：去「字幕素材」点 ＋ 添加，或到「AI方案」让 AI 自动挑段。</div>';
+    return;
+  }
+  box.innerHTML = S.picks.map((id, i) => {
+    const s = subById(id);
+    if (!s) return '';
+    return `<div class="row">
+      <div class="txt">
+        <div class="t">${i + 1}. <span class="sid">[${s.id}]</span>${esc(s.text)}</div>
+        <div class="tm">${fmtT(s.start)} – ${fmtT(s.end)}</div>
+      </div>
+      <button class="mini act-up" data-i="${i}" ${i === 0 ? 'disabled' : ''}>↑</button>
+      <button class="mini act-down" data-i="${i}" ${i === S.picks.length - 1 ? 'disabled' : ''}>↓</button>
+      <button class="mini act-pplay" data-i="${i}">▶</button>
+      <button class="mini act-del" data-i="${i}">✕</button>
+    </div>`;
+  }).join('');
+}
+$('picksList').addEventListener('click', e => {
+  const btn = e.target.closest('button');
+  if (!btn) return;
+  const i = +btn.dataset.i;
+  if (btn.classList.contains('act-up') && i > 0) {
+    [S.picks[i - 1], S.picks[i]] = [S.picks[i], S.picks[i - 1]];
+  } else if (btn.classList.contains('act-down') && i < S.picks.length - 1) {
+    [S.picks[i + 1], S.picks[i]] = [S.picks[i], S.picks[i + 1]];
+  } else if (btn.classList.contains('act-pplay')) {
+    playSeg(subById(S.picks[i])); return;
+  } else if (btn.classList.contains('act-del')) {
+    S.picks.splice(i, 1);
+  } else return;
+  renderPicks(); renderSubs();
+});
+$('btnClearPicks').onclick = () => {
+  if (!S.picks.length) return;
+  S.picks = []; renderPicks(); renderSubs();
+  toast('已清空预选列表');
+};
+$('btnExportPicks').onclick = () => {
+  if (!S.picks.length) return toast('预选为空，请先添加片段');
+  const segs = S.picks.map(subById).filter(Boolean);
+  let out = '【顺序清单】\n' + segs.map((s, i) => `${i + 1}. [字幕${s.id}] ${fmtT(s.start)}–${fmtT(s.end)}  ${s.text}`).join('\n');
+  out += '\n\n【时间轴（SRT）】\n' + segs.map((s, i) => `${i + 1}\n${fmtSRT(s.start)} --> ${fmtSRT(s.end)}\n${s.text}`).join('\n\n');
+  out += '\n\n【纯文本连贯版】\n' + segs.map(s => s.text).join('');
+  downloadText(out, '预选片段.txt');
+  toast('已下载 预选片段.txt');
+};
+
+/* ================= AI 方案 ================= */
+const DEFAULT_PROMPT = '请从字幕中挑出最适合做带货短视频的片段：给我 5 个方案，每个方案 10 段左右，优先保留产品卖点、价格优惠、使用效果相关的内容，去掉寒暄和重复。';
+const SYS_PROMPT = `你是带货视频剪辑助手。用户会给你一份带时间轴的字幕列表，格式为 [序号] 开始秒-结束秒|文本。
+请根据用户的要求，从字幕中挑选片段组成若干套剪辑方案。
+硬性要求：
+1. 严格按用户要求里的方案数量和每套片段数量执行；数量是硬指标，输出前先数一遍每套 ids 的个数，确认无误再输出。
+2. 若用户未说明，默认给出 5 个方案；每套方案 5~60 段；每套方案内片段按字幕时间先后顺序排列。
+3. 严禁几乎全选：单套方案选中条数不得超过字幕总条数的 60%。
+4. 只输出 JSON，不要输出任何解释或标记：{"plans":[{"title":"方案标题","reason":"选段思路","ids":[1,2,3]}]}`;
+const promptBox = $('promptBox');
+promptBox.value = store.get('sc_prompt', DEFAULT_PROMPT);
+let promptSaveT = null;
+promptBox.addEventListener('input', () => {
+  clearTimeout(promptSaveT);
+  promptSaveT = setTimeout(() => store.set('sc_prompt', promptBox.value), 400);
+});
+function compactSubs() {
+  return S.subs.map(s => `[${s.id}] ${s.start.toFixed(1)}-${s.end.toFixed(1)}|${s.text}`).join('\n');
+}
+function fullPromptText() {
+  return `${promptBox.value.trim()}\n\n字幕列表：\n${compactSubs()}`;
+}
+let aiAbort = null, aiDone = false;
+$('btnGen').onclick = () => { S.busy === 'ai' ? stopAI() : genPlans(); };
+function stopAI() {
+  if (aiAbort) aiAbort.abort();
+  aiDone = true;
+  finishAIUI('已终止生成');
+}
+function finishAIUI(msg) {
+  S.busy = null;
+  const b = $('btnGen');
+  b.textContent = '✨ AI 生成方案';
+  b.classList.remove('danger'); b.classList.add('primary');
+  if (msg) $('aiStatus').textContent = msg;
+}
+async function genPlans() {
+  if (taskGuard()) return;
+  if (!S.subs.length) return toast('请先识别或导入字幕，再生成方案');
+  if (!prof().url || !prof().key) { toast('请先填写接口地址和 API Key'); openSheet(); return; }
+  if (!prof().model) { toast('请先在接口设置里选择模型'); openSheet(); return; }
+  S.busy = 'ai'; aiDone = false;
+  const b = $('btnGen');
+  b.textContent = '⏳ 终止生成';
+  b.classList.remove('primary'); b.classList.add('danger');
+  $('aiStatus').textContent = '正在连接接口…';
+  aiAbort = new AbortController();
+  try {
+    const base = prof().url.replace(/\/+$/, '');
+    const endpoint = /\/chat\/completions$/.test(base) ? base : base + '/chat/completions';
+    const body = {
+      model: prof().model,   // 不传 temperature：Kimi 等模型锁参会报 400
+      messages: [
+        { role: 'system', content: SYS_PROMPT },
+        { role: 'user', content: fullPromptText() },
+      ],
+      stream: true,
+    };
+    const resp = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + prof().key },
+      body: JSON.stringify(body),
+      signal: aiAbort.signal,
+    });
+    if (!resp.ok) {
+      const t = (await resp.text().catch(() => '')).slice(0, 300);
+      throw new Error(`接口报错 HTTP ${resp.status}：${t || resp.statusText}`);
+    }
+    // SSE 流式接收
+    const reader = resp.body.getReader();
+    const dec = new TextDecoder();
+    let buf = '', full = '';
+    for (; ;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      let idx;
+      while ((idx = buf.indexOf('\n\n')) >= 0) {
+        const ev = buf.slice(0, idx); buf = buf.slice(idx + 2);
+        for (const line of ev.split('\n')) {
+          if (!line.startsWith('data:')) continue;
+          const d = line.slice(5).trim();
+          if (d === '[DONE]') continue;
+          try {
+            const j = JSON.parse(d);
+            full += (j.choices && j.choices[0] && j.choices[0].delta && j.choices[0].delta.content) || '';
+          } catch { }
+        }
+      }
+      $('aiStatus').textContent = `已接收 ${charsLen(full)} 字`;
+    }
+    if (aiDone) return; // 用户终止
+    const plans = extractPlans(full);
+    if (!plans || !plans.length) {
+      finishAIUI('AI 返回格式异常，请重试（可换个问法或模型）');
+      return;
+    }
+    S.plans = sanitizePlans(plans);
+    if (!S.plans.length) { finishAIUI('AI 给出的序号与字幕对不上，请重试'); return; }
+    finishAIUI(`已生成 ${S.plans.length} 个方案，点击卡片载入预选`);
+    renderPlans(); renderPicks();
+  } catch (e) {
+    if (aiDone || (e && e.name === 'AbortError')) return;
+    let msg = '生成失败：' + (e && e.message ? e.message : e);
+    if (e && (e.name === 'TypeError' || /Failed to fetch|NetworkError|Load failed/i.test(String(e.message))))
+      msg = '接口跨域失败（CORS）：该接口不允许浏览器直连，请更换接口或网络环境';
+    finishAIUI(msg);
+  }
+}
+function extractPlans(full) {
+  const a = full.indexOf('{'), z = full.lastIndexOf('}');
+  if (a < 0 || z <= a) return null;
+  try {
+    const j = JSON.parse(full.slice(a, z + 1));
+    return Array.isArray(j.plans) ? j.plans : null;
+  } catch { return null; }
+}
+function sanitizePlans(plans) {
+  const out = [];
+  for (const p of plans) {
+    if (!p || !Array.isArray(p.ids)) continue;
+    const seen = new Set();
+    const ids = [];
+    for (const x of p.ids) {
+      const id = parseInt(x, 10);
+      if (id && subById(id) && !seen.has(id)) { seen.add(id); ids.push(id); }
+    }
+    ids.sort((a, b) => subById(a).start - subById(b).start);   // 按时间排序
+    if (ids.length) out.push({ title: String(p.title || '剪辑方案'), reason: String(p.reason || ''), ids });
+  }
+  return out;
+}
+function renderPlans() {
+  const box = $('plansList');
+  if (!S.plans.length) { box.innerHTML = ''; return; }
+  box.innerHTML = S.plans.map((p, i) => `
+    <div class="planCard" data-i="${i}">
+      <div class="head"><span class="badge">方案${i + 1}</span><span class="title">${esc(p.title)}</span></div>
+      ${p.reason ? `<div class="reason">${esc(p.reason)}</div>` : ''}
+      <div class="meta">共${p.ids.length}段·约${fmtDur(planDur(p.ids))}</div>
+      <div class="ids">序号：${p.ids.join('、')}</div>
+    </div>`).join('');
+  box.querySelectorAll('.planCard').forEach(c => c.onclick = () => loadPlan(+c.dataset.i, true));
+}
+function loadPlan(i, jump) {
+  const p = S.plans[i];
+  if (!p) return;
+  S.picks = [...p.ids];
+  renderPicks(); renderSubs();
+  if (jump) switchTab('picks');
+  toast(`已载入「方案${i + 1}」：${p.ids.length} 段`);
+}
+$('btnCopyAll').onclick = async () => {
+  if (!S.subs.length) return toast('请先识别或导入字幕');
+  const text = fullPromptText();
+  try {
+    await navigator.clipboard.writeText(text);
+    toast('已复制到剪贴板，可粘贴到任意 AI 使用');
+  } catch {
+    try {
+      const ta = document.createElement('textarea');
+      ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+      document.body.appendChild(ta); ta.select();
+      document.execCommand('copy'); ta.remove();
+      toast('已复制到剪贴板，可粘贴到任意 AI 使用');
+    } catch { toast('复制失败，请改用「⬇ 文档」下载'); }
+  }
+};
+function downloadDoc() {
+  if (!S.subs.length) return toast('请先识别或导入字幕');
+  const body = '【提示词】\n' + promptBox.value.trim()
+    + '\n\n【全部字幕】\n' + S.subs.map(s => `[${s.id}] ${fmtSRT(s.start)} --> ${fmtSRT(s.end)}  ${s.text}`).join('\n');
+  downloadText(body, '提示词与字幕.txt');
+  toast('已下载 提示词与字幕.txt');
+}
+$('btnDoc').onclick = downloadDoc;
+$('btnDoc2').onclick = downloadDoc;
+
+/* ================= ffmpeg 引擎（懒加载，core-st 单线程内核） ================= */
+let ff = null, ffLoading = null, ffLogs = [];
+async function loadFFmpeg() {
+  if (ff && ff.isLoaded()) return ff;
+  if (ffLoading) return ffLoading;
+  if (!window.FFmpeg) throw new Error('ffmpeg 组件加载失败，请检查网络后刷新页面');
+  ff = FFmpeg.createFFmpeg({
+    log: false,
+    mainName: 'main',   // core-st 必须配 mainName:"main"，否则报 proxy_main 错误
+    corePath: 'https://cdn.jsdelivr.net/npm/@ffmpeg/core-st@0.11.1/dist/ffmpeg-core.js',
+  });
+  try {   // 捕获内核日志，便于排查音轨问题
+    ffLogs = [];
+    ff.setLogger(({ message }) => { if (message) { ffLogs.push(message); if (ffLogs.length > 60) ffLogs.shift(); } });
+  } catch { }
+  ffLoading = ff.load().then(() => { ffLoading = null; return ff; }).catch(e => { ffLoading = null; ff = null; throw e; });
+  return ffLoading;
+}
+function resetFFmpeg() { ff = null; ffLoading = null; }
+/* ff.run 安全包装：0.11.6 中命令一旦失败，实例会永久"假忙"（之后所有 run 都报
+   can only run one command at a time），失败即丢弃实例，下次操作自动加载全新引擎 */
+async function ffRunSafe(...args) {
+  try { return await ff.run(...args); }
+  catch (e) { resetFFmpeg(); throw e; }
+}
+function ffUnlink(...names) {
+  for (const n of names) { try { ff && ff.FS('unlink', n); } catch { } }
+}
+function videoExt(name) {
+  const m = /\.([a-z0-9]{2,5})$/i.exec(name || '');
+  return m ? '.' + m[1].toLowerCase() : '.mp4';
+}
+/* 提取 16kHz 单声道 PCM：
+   优先浏览器原生解码（Web Audio，不占用 WASM 内存、无需下载引擎、大视频更稳），
+   失败再回退 ffmpeg.wasm（应对个别浏览器解不了的封装格式） */
+async function extractAudio16k(blob) {
+  try {
+    const buf = await blob.arrayBuffer();
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) throw new Error('no AudioContext');
+    const ctx = new AC();
+    try { await ctx.resume(); } catch { }
+    const ab = await new Promise((res, rej) => {
+      let settled = false;
+      const ok = v => { if (!settled) { settled = true; res(v); } };
+      const bad = e => { if (!settled) { settled = true; rej(e || new Error('decode failed')); } };
+      try {
+        const p = ctx.decodeAudioData(buf, ok, bad);
+        if (p && p.then) p.then(ok, bad);
+      } catch (e) { bad(e); }
+    });
+    const OAC = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+    const frames = Math.max(16000, Math.ceil(ab.duration * 16000));
+    const off = new OAC(1, frames, 16000);
+    const s = off.createBufferSource();
+    s.buffer = ab; s.connect(off.destination); s.start();
+    const rendered = await off.startRendering();
+    try { ctx.close(); } catch { }
+    return rendered.getChannelData(0).slice();   // 16kHz 单声道 Float32Array
+  } catch (e) {
+    console.warn('浏览器原生音频解码失败，改用引擎提取', e);
+    mask.set(0.02, '浏览器直读失败，改用引擎提取音频…');
+    await loadFFmpeg();
+    const src = 'src' + videoExt(S.videoName);
+    ff.FS('writeFile', src, await FFmpeg.fetchFile(blob));
+    try {
+      await ffRunSafe('-i', src, '-vn', '-ac', '1', '-ar', '16000', '-f', 'f32le', '-acodec', 'pcm_f32le', 'audio.pcm');
+      const pcm = ff.FS('readFile', 'audio.pcm');
+      const usable = pcm.byteLength - (pcm.byteLength % 4);
+      return new Float32Array(pcm.buffer.slice(pcm.byteOffset, pcm.byteOffset + usable));
+    } finally { ffUnlink(src, 'audio.pcm'); }
+  }
+}
+
+/* ================= 语音识别（浏览器本地 Whisper，免费） ================= */
+let asrPipe = null, asrModelKey = '', asrAborted = false, asrAbortCtrl = null, asrVariantCache = null;
+function abortASR() {
+  asrAborted = true;
+  try { asrAbortCtrl && asrAbortCtrl.abort(); } catch { }
+  try { ff && ff.exit(); } catch { }
+  resetFFmpeg();
+  S.busy = null;
+  mask.close();
+  toast('已终止识别');
+}
+$('btnASR').onclick = () => {
+  if (S.busy === 'asr') return;
+  if (taskGuard()) return;
+  if (!S.videoBlob) return toast('请先选择视频');
+  runASR();
+};
+function whisperHosts() {
+  const hosts = [];
+  if (/^https?:$/.test(location.protocol)) hosts.push(location.origin + '/hf'); // ① 中转服务（有则最稳）
+  hosts.push('https://huggingface.co');  // ② 官方（允许浏览器跨域）
+  hosts.push('https://hf-mirror.com');   // ③ 国内镜像（部分网络可用）
+  return hosts;
+}
+function hostLabel(host) {
+  return host.endsWith('/hf') ? '本地中转' : new URL(host).host;
+}
+/* 快速探测模型源是否可用（9 秒超时），避免不可达源长时间挂起 */
+async function probeHost(host, modelId, timeoutMs = 9000) {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const resp = await fetch(`${host}/${modelId}/resolve/main/config.json`, {
+      signal: ctrl.signal, cache: 'no-store',   // 用 GET：部分简易服务器不支持 HEAD
+    });
+    return resp.ok ? null : 'HTTP ' + resp.status;   // null 表示可用
+  } catch (e) {
+    return (e && e.name === 'AbortError') ? '连接超时' : '被拦截或无法连接';
+  } finally { clearTimeout(t); }
+}
+async function loadWhisper(modelId, onDlProgress) {
+  if (asrPipe && asrModelKey === modelId) return asrPipe;
+  const { pipeline, env } = await import('https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.0.2');
+  env.useBrowserCache = typeof caches !== 'undefined';  // 模型只下载一次，之后离线可用（非安全上下文自动降级）
+  env.allowLocalModels = false;
+  const fails = [];
+  for (const host of whisperHosts()) {
+    const label = hostLabel(host);
+    onDlProgress(0, `正在检测模型源 ${label}…`);
+    const probeErr = await probeHost(host, modelId);
+    if (probeErr) { fails.push(`${label} ${probeErr}`); continue; }
+    try {
+      env.remoteHost = host;
+      onDlProgress(0, `正在连接模型源 ${label}…`);
+      const p = await pipeline('automatic-speech-recognition', modelId, {
+        dtype: 'q8',
+        progress_callback: d => {
+          if (d && d.status === 'progress' && d.total)
+            onDlProgress(clamp01(d.loaded / d.total), `正在下载模型（${label}）`);
+        },
+      });
+      asrPipe = p; asrModelKey = modelId;
+      return p;
+    } catch (e) { fails.push(`${label} 下载中断`); console.warn('模型源失败', host, e); }
+  }
+  const err = new Error(fails.join('；') || '全部下载源不可用');
+  err.stage = 'model';
+  throw err;
+}
+async function runASR() {
+  if (taskGuard()) return;
+  S.busy = 'asr'; asrAborted = false;
+  mask.open('🎙 语音识别（手机本地进行，不上传）', abortASR);
+  mask.set(0.01, '正在提取音频…');
+  try {
+    // 1) 提取 16kHz 单声道 PCM（优先浏览器原生解码，失败自动回退引擎）
+    let audio, audioSec;
+    try {
+      audio = await extractAudio16k(S.videoBlob);
+      if (asrAborted) return;
+      audioSec = audio.length / 16000;
+    } catch (e) {
+      if (asrAborted) return;
+      e.stage = 'extract'; throw e;
+    }
+    if (audioSec < 0.3) {
+      const e = new Error('没有提取到有效音频（视频可能无声音）');
+      e.stage = 'extract'; throw e;
+    }
+    // 2) 加载 Whisper（多源回退），下载阶段占进度 5%~40%
+    const modelId = whisperTier.get() === 'base' ? 'Xenova/whisper-base' : 'Xenova/whisper-tiny';
+    const asr = await loadWhisper(modelId, (p, sub) => {
+      if (!asrAborted) mask.set(0.05 + p * 0.35, sub + (p ? ` ${Math.round(p * 100)}%` : ''));
+    });
+    if (asrAborted) return;
+    // 3) 识别（按音频块估算进度 40%~95%）
+    const t0 = Date.now();
+    const estTotal = Math.max(8, audioSec * 1.2) * 1000; // 粗略估算，仅用于进度显示
+    const tick = setInterval(() => {
+      if (asrAborted) return;
+      const p = Math.min(0.95, 0.4 + (Date.now() - t0) / estTotal * 0.55);
+      mask.set(p, `正在识别语音…（约 ${Math.round(audioSec)} 秒音频）`);
+    }, 300);
+    let out;
+    try {
+      out = await asr(audio, {
+        chunk_length_s: 30,
+        stride_length_s: 5,
+        language: 'chinese',
+        return_timestamps: true,
+      });
+    } catch (e) { e.stage = 'infer'; throw e; }
+    finally { clearInterval(tick); }
+    if (asrAborted) return;
+    // 4) 分块结果转字幕条目
+    const subs = chunksToSubs(out && out.chunks || [], audioSec);
+    if (!subs.length) {
+      const e = new Error('没有识别到有效语音内容');
+      e.stage = 'infer'; throw e;
+    }
+    S.busy = null;
+    mask.set(1, '完成');
+    setTimeout(() => { mask.close(); setSubs(subs, `识别完成，共 ${subs.length} 条字幕`); switchTab('subs'); }, 350);
+  } catch (e) {
+    if (asrAborted) return;
+    S.busy = null;
+    mask.close();
+    console.error(e);
+    const stage = e && e.stage;
+    if (stage === 'engine') toast('拼接引擎加载失败（首次约25MB，用于提取音频）：请检查网络后重试', 4600);
+    else if (stage === 'extract') toast('音频提取失败：' + (e.message || e) + '。可再点一次「识别字幕」重试（已自动重置引擎）；仍失败请换个视频', 6000);
+    else if (stage === 'model') toast('模型下载失败（' + e.message + '）。可改用「字幕文件」导入现成 .srt，或部署 server.py 中转后重试', 6500);
+    else if (stage === 'infer') toast('识别过程出错：' + (e.message || e), 4600);
+    else toast('语音识别失败：' + (e && e.message || e), 4600);
+  }
+}
+/* 分块 → 字幕；超长句（>42 字）按标点拆分，时间按字数比例均分 */
+function chunksToSubs(chunks, audioSec) {
+  const subs = [];
+  for (const c of chunks) {
+    if (!c || !c.timestamp) continue;
+    let [st, en] = c.timestamp;
+    if (st == null) continue;
+    if (en == null || en <= st) en = Math.min(st + 2.5, audioSec || st + 2.5);
+    const text = String(c.text || '').trim();
+    if (!text) continue;
+    pushSub(subs, st, en, text);
+  }
+  return subs.map((s, i) => ({ id: i + 1, start: +s.start.toFixed(2), end: +s.end.toFixed(2), text: s.text }));
+}
+function pushSub(subs, st, en, text) {
+  if (charsLen(text) <= 42) { subs.push({ start: st, end: en, text }); return; }
+  // 按标点拆分（保留标点），过短的碎片并回上一段
+  let parts = text.match(/[^，。！？；：,.!?;:…—]+[，。！？；：,.!?;:…—]*/g) || [text];
+  const merged = [];
+  for (const p of parts) {
+    if (merged.length && charsLen(p) < 4) merged[merged.length - 1] += p;
+    else merged.push(p);
+  }
+  parts = merged.filter(p => p.trim());
+  if (parts.length <= 1) { subs.push({ start: st, end: en, text }); return; }
+  const total = parts.reduce((a, p) => a + charsLen(p), 0) || 1;
+  let cur = st;
+  parts.forEach((p, i) => {
+    const dur = i === parts.length - 1 ? en - cur : (en - st) * charsLen(p) / total;
+    const t = p.trim();
+    if (t) subs.push({ start: cur, end: cur + dur, text: t });
+    cur += dur;
+  });
+}
+
+/* ================= 拼接预览 / 导出成片 ================= */
+const BATCH_SIZE = 30;
+$('btnPreview').onclick = () => concat(false);
+$('btnExport').onclick = () => concat(true);
+function abortConcat() {
+  try { ff && ff.exit(); } catch { }
+  resetFFmpeg();
+  S.busy = null;
+  mask.close();
+  toast('已终止拼接');
+}
+async function concat(exportMode) {
+  if (taskGuard()) return;
+  if (!S.videoBlob) return toast('请先选择视频');
+  const segs = S.picks.map(subById).filter(Boolean);
+  if (!segs.length) return toast('预选为空：请先添加片段');
+  S.busy = 'concat';
+  const label = exportMode ? '⬇ 导出成片（原分辨率）' : '▶ 拼接预览（360p 快速）';
+  mask.open(label, abortConcat);
+  mask.set(0, '正在加载拼接引擎（约25MB，仅首次下载）…');
+  const written = [];
+  try {
+    await loadFFmpeg();
+    const src = 'src' + videoExt(S.videoName);
+    ff.FS('writeFile', src, await FFmpeg.fetchFile(S.videoBlob));
+    written.push(src);
+    const totalDur = segs.reduce((a, s) => a + (s.end - s.start), 0) || 1;
+    const outName = 'out.mp4';
+    if (segs.length <= BATCH_SIZE) {
+      await runConcatPass(src, segs, outName, exportMode,
+        r => mask.set(clamp01(r) * 0.98, '正在逐段拼接…'));
+    } else {
+      // 超过 30 段：自动分批编码，再 -c copy 无损合并（手机内存保守）
+      const batches = [];
+      for (let i = 0; i < segs.length; i += BATCH_SIZE) batches.push(segs.slice(i, i + BATCH_SIZE));
+      const parts = [];
+      let doneW = 0;
+      for (let i = 0; i < batches.length; i++) {
+        const w = batches[i].reduce((a, s) => a + (s.end - s.start), 0) / totalDur;
+        const part = `part${i}.mp4`;
+        await runConcatPass(src, batches[i], part, exportMode,
+          r => mask.set(clamp01(doneW + clamp01(r) * w) * 0.96, `正在拼接（第 ${i + 1}/${batches.length} 批）…`));
+        parts.push(part); written.push(part);
+        doneW += w;
+      }
+      mask.set(0.97, '正在无损合并…');
+      ff.FS('writeFile', 'list.txt', parts.map(p => `file '${p}'`).join('\n'));
+      written.push('list.txt');
+      await ffRunSafe('-f', 'concat', '-safe', '0', '-i', 'list.txt', '-c', 'copy', outName);
+    }
+    const data = ff.FS('readFile', outName);
+    written.push(outName);
+    ffUnlink(...written);
+    S.busy = null;
+    mask.set(1, '完成');
+    setTimeout(() => mask.close(), 300);
+    const blob = new Blob([data.buffer], { type: 'video/mp4' });
+    if (exportMode) {
+      const d = new Date();
+      downloadBlob(blob, `成片_${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}_${pad(d.getHours())}${pad(d.getMinutes())}.mp4`);
+      toast('成片已开始下载（mp4）');
+    } else {
+      segStopAt = null;
+      player.src = URL.createObjectURL(blob);
+      player.play().catch(() => { });
+      toast('预览已生成，正在播放成片');
+    }
+  } catch (e) {
+    ffUnlink(...written);
+    if (!S.busy) return;             // 用户终止
+    S.busy = null;
+    mask.close();
+    resetFFmpeg();                   // 引擎崩溃/终止后置空，下次重新加载
+    toast((exportMode ? '导出失败：' : '预览失败：') + (e && e.message || e), 4200);
+    console.error(e);
+  }
+}
+/* 单遍 filter_complex（trim+concat）一次完成。
+   音轨三级重试：① 常规 ② 音轨规格化（采样率/声道统一）③ 纯视频无声（并明确告知）。
+   每次失败后重置引擎（避免"假忙"实例）并重写输入文件。 */
+async function runConcatPass(src, segs, outName, exportMode, onRatio) {
+  const t = x => Math.max(0, x).toFixed(3);
+  const preset = exportMode ? 'veryfast' : 'ultrafast';
+  const crf = exportMode ? '20' : '32';
+  const vAudio = ['-c:v', 'libx264', '-preset', preset, '-crf', crf, '-c:a', 'aac', '-b:a', exportMode ? '160k' : '96k'];
+  const vOnly = ['-c:v', 'libx264', '-preset', preset, '-crf', crf];
+  const scaleTail = exportMode ? '' : ';[vc]scale=-2:360,fps=24[vout]';   // 预览提速：360p + 24fps
+  const vLabel = exportMode ? 'vc' : 'vout';
+  const vParts = segs.map((s, i) => `[0:v]trim=start=${t(s.start)}:end=${t(s.end)},setpts=PTS-STARTPTS[v${i}]`).join(';');
+  const build = mode => {
+    if (mode === 'none')
+      return { fc: `${vParts};${segs.map((s, i) => `[v${i}]`).join('')}concat=n=${segs.length}:v=1:a=0[vc]${scaleTail}`, maps: ['-map', `[${vLabel}]`, '-an'], args: vOnly };
+    const aChain = mode === 'norm' ? ',aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo' : '';
+    const aParts = segs.map((s, i) => `[0:a]atrim=start=${t(s.start)}:end=${t(s.end)},asetpts=PTS-STARTPTS${aChain}[a${i}]`).join(';');
+    return { fc: `${vParts};${aParts};${segs.map((s, i) => `[v${i}][a${i}]`).join('')}concat=n=${segs.length}:v=1:a=1[vc][a]${scaleTail}`, maps: ['-map', `[${vLabel}]`, '-map', '[a]'], args: vAudio };
+  };
+  const attempts = [build('plain'), build('norm'), build('none')];
+  for (let ai = 0; ai < attempts.length; ai++) {
+    const at = attempts[ai];
+    try {
+      ff.setProgress(({ ratio }) => onRatio && onRatio(ratio));
+      await ff.run('-i', src, '-filter_complex', at.fc, ...at.maps, ...at.args, '-movflags', '+faststart', '-y', outName);
+      if (ai === 2) toast('原视频音轨无法拼接，本次输出为无声版', 4000);
+      return;
+    } catch (e) {
+      console.warn('拼接尝试失败（方式' + ai + '）', e, '\n' + ffLogs.slice(-8).join('\n'));
+      resetFFmpeg();   // 失败即丢弃实例，避免"假忙"
+      if (ai < attempts.length - 1) {
+        mask.set(0.05, ai === 0 ? '音轨异常，正在换方式重试…' : '正在重新加载拼接引擎…');
+        await loadFFmpeg();
+        ff.FS('writeFile', src, await FFmpeg.fetchFile(S.videoBlob));   // 新实例需重写输入
+      } else throw e;
+    }
+  }
+}
+
+/* ================= 演示模式 ================= */
+const DEMO_SUBS = [{"id":1,"start":0.15,"end":3.36,"text":"今天给大家推荐一款回购率超高的保温杯。"},{"id":2,"start":3.48,"end":7.36,"text":"保温十二个小时，早上装的热水，晚上喝还是烫的。"},{"id":3,"start":7.48,"end":10.52,"text":"今天直播间活动，拍一发二，还送杯刷。"},{"id":4,"start":10.64,"end":13.67,"text":"库存不多了，想要的赶紧点小黄车下单。"}];
+async function loadDemo() {
+  if (taskGuard()) return;
+  toast('正在加载演示…');
+  try {
+    const resp = await fetch('demo.mp4');
+    if (!resp.ok) throw new Error('http ' + resp.status);
+    const blob = await resp.blob();
+    setVideoSource(new File([blob], 'demo.mp4', { type: 'video/mp4' }), 'demo.mp4');
+    setSubs(DEMO_SUBS.map(s => ({ ...s })), '演示已就绪：字幕已加载，试试 ＋ 加入预选，再点底部「拼接预览」');
+    switchTab('subs');
+  } catch (e) {
+    toast('演示视频加载失败：请确认 demo.mp4 与本页面在同一目录（需通过 http 访问）', 4200);
+  }
+}
+$('btnDemo').onclick = loadDemo;
+
+/* ================= 使用密钥（试用 3 天 / 永久） ================= */
+const LOCK = {
+  trialHash: '378b52bdefe7944e',   // 试用密钥（有效期 3 天）
+  permHash: 'fc214d81b5870155',    // 永久密钥
+  trialDays: 3,
+};
+function hashPwd(str) {
+  let h1 = 0xdeadbeef ^ 42, h2 = 0x41c6ce57 ^ 42;
+  for (let i = 0; i < str.length; i++) {
+    const ch = str.charCodeAt(i);
+    h1 = Math.imul(h1 ^ ch, 2654435761);
+    h2 = Math.imul(h2 ^ ch, 1597334677);
+  }
+  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+  return (h2 >>> 0).toString(16) + (h1 >>> 0).toString(16);
+}
+function authState() { try { return JSON.parse(localStorage.getItem('sc_auth')); } catch { return null; } }
+const saveAuth = a => { try { localStorage.setItem('sc_auth', JSON.stringify(a)); } catch { } };
+function trialLeft(start) { return LOCK.trialDays * 864e5 - (Date.now() - start); }
+function checkGate() {
+  const a = authState();
+  if (a && a.type === 'perm') return true;
+  if (a && a.type === 'trial' && trialLeft(a.start) > 0) return true;
+  $('lock').style.display = 'flex';
+  if (a && a.type === 'trial') $('lockErr').textContent = '试用期已到期，请输入永久密钥';
+  return false;
+}
+function unlock() {
+  const v = $('lockInput').value.trim();
+  if (!v) return;
+  const h = hashPwd(v);
+  if (h === LOCK.permHash) {
+    saveAuth({ type: 'perm' });
+    $('lock').style.display = 'none';
+    toast('永久密钥已激活，感谢使用');
+  } else if (h === LOCK.trialHash) {
+    const a = authState();
+    const start = (a && a.type === 'trial' && a.start) || Date.now();
+    if (trialLeft(start) <= 0) { $('lockErr').textContent = '该试用密钥已到期，请输入永久密钥'; return; }
+    saveAuth({ type: 'trial', start });
+    $('lock').style.display = 'none';
+    toast(`试用已激活，有效期 ${LOCK.trialDays} 天`);
+  } else {
+    $('lockErr').textContent = '密钥错误，请核对后重试';
+  }
+}
+$('lockBtn').onclick = unlock;
+$('lockInput').addEventListener('keydown', e => { if (e.key === 'Enter') unlock(); });
+
+/* ================= 初始化 ================= */
+checkGate();
+renderAll();
+</script>
+</body>
+</html>
