@@ -227,7 +227,12 @@
     <div class="selRow">
       <select id="profSelect"></select>
       <button class="mini" id="btnProfAdd">＋新增</button>
+      <button class="mini" id="btnProfRename">改名</button>
       <button class="mini" id="btnProfDel">删除</button>
+    </div>
+    <div class="selRow" id="renameRow" style="display:none;margin-top:8px">
+      <input id="profNameInput" type="text" placeholder="输入新名字，如 Kimi、通义千问" style="flex:1;min-width:0" autocapitalize="off" autocorrect="off">
+      <button class="mini" id="btnProfRenameOk">确定</button>
     </div>
   </div>
   <div class="fld">
@@ -240,7 +245,7 @@
   </div>
   <div class="fld">
     <label>接口地址</label>
-    <input id="profUrl" type="text" placeholder="https://api.deepseek.com/v1" autocapitalize="off" autocorrect="off">
+    <input id="profUrl" type="text" placeholder="接口地址，如 https://api.deepseek.com/v1" autocapitalize="off" autocorrect="off">
   </div>
   <div class="fld">
     <label>模型（下拉选择，选中的即用于 AI 方案）</label>
@@ -248,6 +253,7 @@
       <select id="profModelSel"></select>
       <button class="mini" id="btnModelDel">删除此模型</button>
     </div>
+    <div class="hint" id="modelHint" style="margin:6px 2px 0"></div>
   </div>
   <div class="fld">
     <label>添加模型（输入模型名 → 点「验证连接」，成功自动加入下拉列表）</label>
@@ -324,8 +330,9 @@ const store = {
   set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch { } },
 };
 /* ================= 接口配置（多套，内置 DeepSeek） ================= */
+const LOCKED_MODELS = ['deepseek-v4-flash', 'deepseek-v4-pro'];   // 内置模型：锁定不可删除（防小白误删）
 function defaultProfiles() {
-  return { active: 0, list: [{ name: 'DeepSeek', url: 'https://api.deepseek.com/v1', key: '', models: ['deepseek-v4-flash', 'deepseek-v4-pro'], model: 'deepseek-v4-flash' }] };
+  return { active: 0, list: [{ name: 'DeepSeek', builtin: true, url: 'https://api.deepseek.com/v1', key: '', models: [...LOCKED_MODELS], model: LOCKED_MODELS[0] }] };
 }
 let profiles = store.get('sc_profiles', null);
 if (!profiles || !Array.isArray(profiles.list) || !profiles.list.length) {
@@ -335,6 +342,14 @@ if (!profiles || !Array.isArray(profiles.list) || !profiles.list.length) {
     profiles.list.push({ name: '配置2', url: old.url || '', key: old.key || '', models: old.model ? [old.model] : [], model: old.model || '' });
   store.set('sc_profiles', profiles);
 }
+(function migrateBuiltin() {   // 旧数据：标记内置配置、补齐被删的锁定模型
+  const b = profiles.list.find(p => p.builtin || (p.name === 'DeepSeek' && /api\.deepseek\.com/.test(p.url || '')));
+  if (!b) return;
+  b.builtin = true;
+  LOCKED_MODELS.forEach(m => { if (!b.models.includes(m)) b.models.push(m); });
+  if (!b.models.includes(b.model)) b.model = b.models[0] || '';
+  store.set('sc_profiles', profiles);
+})();
 const saveProfiles = () => store.set('sc_profiles', profiles);
 const prof = () => profiles.list[Math.min(profiles.active, profiles.list.length - 1)];
 const whisperTier = { get: () => store.get('sc_whisper', 'tiny'), set: v => store.set('sc_whisper', v) };
@@ -382,12 +397,13 @@ function setRadio(rowId, val) {
 }
 function renderSheet() {
   $('profSelect').innerHTML = profiles.list.map((p, i) =>
-    `<option value="${i}"${i === profiles.active ? ' selected' : ''}>${esc(p.name)}</option>`).join('');
+    `<option value="${i}"${i === profiles.active ? ' selected' : ''}>${esc(p.name)}${p.builtin ? '（内置）' : ''}</option>`).join('');
   const p = prof();
   $('profUrl').value = p.url;
   $('profKey').value = p.key;
   $('profModelNew').value = '';
   $('testStatus').textContent = '';
+  $('renameRow').style.display = 'none';
   renderModelSel();
   setRadio('whisperRow', whisperTier.get());
   // 密钥信息
@@ -398,11 +414,24 @@ function renderSheet() {
     $('authInfo').textContent = `当前为试用密钥：剩余 ${d} 天 ${h} 小时，到期后需输入永久密钥`;
   } else $('authInfo').textContent = '当前为永久密钥';
 }
+const MODEL_TIPS = {
+  'deepseek-v4-flash': '⚡ 快速版：出方案快、价格低，日常首选',
+  'deepseek-v4-pro': '🧠 旗舰版：深度推理更强、复杂文案更稳；速度较慢，价格约为快速版 12 倍',
+};
 function renderModelSel() {
   const p = prof();
   $('profModelSel').innerHTML = p.models.length
     ? p.models.map(m => `<option${m === p.model ? ' selected' : ''}>${esc(m)}</option>`).join('')
     : '<option value="">（请先添加模型）</option>';
+  renderModelHint();
+}
+function renderModelHint() {
+  const p = prof(), m = p.model;
+  $('modelHint').textContent = MODEL_TIPS[m] || (m ? '自定义模型：通过「验证连接」后会自动加入此列表' : '');
+  const locked = p.builtin && LOCKED_MODELS.includes(m);
+  const del = $('btnModelDel');
+  del.disabled = locked;                 // 内置模型锁定：按钮置灰，防止小白误删
+  del.style.opacity = locked ? .4 : 1;
 }
 function openSheet() { renderSheet(); $('sheet').classList.add('show'); $('sheetMask').style.display = 'block'; }
 function closeSheet() { $('sheet').classList.remove('show'); $('sheetMask').style.display = 'none'; }
@@ -419,9 +448,27 @@ $('btnProfAdd').onclick = () => {
   profiles.list.push({ name: '配置' + n, url: '', key: '', models: [], model: '' });
   profiles.active = profiles.list.length - 1;
   saveProfiles(); renderSheet();
-  toast('已新增配置，请填写接口地址和 Key');
+  toast('已新增空白配置：填接口地址和 Key，可点「改名」命名（如 Kimi、千问）');
+};
+$('btnProfRename').onclick = () => {
+  const row = $('renameRow');
+  row.style.display = row.style.display === 'none' ? 'flex' : 'none';
+  if (row.style.display !== 'none') {
+    $('profNameInput').value = prof().name;
+    $('profNameInput').focus();
+  }
+};
+$('btnProfRenameOk').onclick = () => {
+  const n = $('profNameInput').value.trim().slice(0, 20);
+  if (!n) return toast('名字不能为空');
+  if (profiles.list.some((q, i) => i !== profiles.active && q.name === n)) return toast('已存在同名配置');
+  prof().name = n;
+  $('renameRow').style.display = 'none';
+  saveProfiles(); renderSheet();
+  toast('已改名为「' + n + '」');
 };
 $('btnProfDel').onclick = () => {
+  if (prof().builtin) return toast('内置 DeepSeek 配置已锁定不能删除（防止误删）；自己新增的配置可正常删除');
   if (profiles.list.length <= 1) return toast('至少保留一套配置');
   if (!confirm(`确定删除「${prof().name}」吗？`)) return;
   profiles.list.splice(profiles.active, 1);
@@ -430,10 +477,12 @@ $('btnProfDel').onclick = () => {
 };
 $('profUrl').oninput = e => { prof().url = e.target.value.trim(); saveProfiles(); };
 $('profKey').oninput = e => { prof().key = e.target.value.trim(); saveProfiles(); };
-$('profModelSel').onchange = e => { prof().model = e.target.value; saveProfiles(); };
+$('profModelSel').onchange = e => { prof().model = e.target.value; saveProfiles(); renderModelHint(); };
 $('btnModelDel').onclick = () => {
   const p = prof();
   if (!p.model) return toast('当前没有选中模型');
+  if (p.builtin && LOCKED_MODELS.includes(p.model))
+    return toast('内置模型已锁定不能删除（防止误删）；自己添加的模型可正常删除');
   p.models = p.models.filter(m => m !== p.model);
   p.model = p.models[0] || '';
   saveProfiles(); renderModelSel();
@@ -968,6 +1017,8 @@ function whisperHosts() {
   if (/^https?:$/.test(location.protocol)) hosts.push(location.origin + '/hf'); // ① 中转服务（有则最稳）
   hosts.push('https://huggingface.co');  // ② 官方（允许浏览器跨域）
   hosts.push('https://hf-mirror.com');   // ③ 国内镜像（部分网络可用）
+  const good = store.get('sc_hf_host', '');   // 上次成功的源排最前：静态托管时跳过 404 中转与不可达源
+  if (good && hosts.includes(good)) return [good, ...hosts.filter(h => h !== good)];
   return hosts;
 }
 function hostLabel(host) {
@@ -1008,6 +1059,7 @@ async function loadWhisper(modelId, onDlProgress) {
         },
       });
       asrPipe = p; asrModelKey = modelId;
+      store.set('sc_hf_host', host);   // 记住可用源，下次免探测
       return p;
     } catch (e) { fails.push(`${label} 下载中断`); console.warn('模型源失败', host, e); }
   }
