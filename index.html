@@ -93,6 +93,11 @@
   .capsule{flex:none;border:1px solid var(--line);background:var(--card2);border-radius:999px;
     padding:7px 14px;font-size:14px;color:var(--txt);white-space:nowrap;min-height:0;cursor:pointer;}
   .capsule.on{background:var(--blue);border-color:var(--blue);font-weight:600;}
+  #bridgeBox{background:var(--card2);border:1px solid var(--line);border-radius:12px;padding:10px;margin-top:10px;}
+  #bridgeBox .hint b{color:var(--gold);font-weight:600;}
+  #apiDetails{margin-top:12px;border:1px dashed var(--line);border-radius:12px;padding:10px 12px;}
+  #apiDetails summary{font-size:14.5px;color:var(--sub);cursor:pointer;list-style:none;min-height:30px;}
+  #apiDetails summary::-webkit-details-marker{display:none;}
   #bottomBar{position:fixed;left:0;right:0;bottom:0;z-index:20;background:rgba(16,19,24,.96);
     backdrop-filter:blur(8px);border-top:1px solid var(--line);
     padding:10px 12px calc(10px + env(safe-area-inset-bottom));}
@@ -185,7 +190,7 @@
   <nav id="tabs">
     <button data-tab="subs" class="on">字幕素材 <span id="cntSubs">0</span></button>
     <button data-tab="picks">预选片段 <span id="cntPicks">0</span></button>
-    <button data-tab="ai">AI方案</button>
+    <button data-tab="ai">AI选段</button>
   </nav>
 
   <main>
@@ -211,16 +216,37 @@
     </section>
 
     <section id="tabAI" class="panel" style="display:none">
-      <div class="hint">提示词（会自动保存）：</div>
-      <textarea id="promptBox" placeholder="例如：挑出最适合做带货短视频的片段，给5个方案，每个10段左右，优先保留卖点、价格、使用效果。"></textarea>
-      <div class="btnRow" style="margin-top:10px">
-        <button id="btnGen" class="primary">✨ AI 生成方案</button>
+      <div class="hint">第 1 步 · 选择提示词模板（也可以直接改文字）：</div>
+      <div class="selRow" style="margin-bottom:8px">
+        <select id="tplSel"></select>
+        <button class="mini" id="btnTplSave">💾 存为模板</button>
+        <button class="mini" id="btnTplDel" style="display:none">🗑</button>
       </div>
-      <div class="statusLine" id="aiStatus"></div>
-      <div class="btnRow">
-        <button id="btnCopyAll">复制提示词+字幕</button>
-        <button id="btnDoc2">⬇ 文档</button>
+      <textarea id="promptBox" placeholder="例如：挑出最适合做带货短视频的片段，优先保留卖点、价格、使用效果。"></textarea>
+
+      <div id="bridgeBox">
+        <div class="hint">第 2 步 · <b>不用配置任何接口</b>：点下面的按钮复制，然后打开手机里的
+          <b>豆包 / DeepSeek / Kimi</b> 等免费 AI，粘贴发送：</div>
+        <div class="btnRow" style="margin-top:6px">
+          <button id="btnCopyAll" class="primary">📋 复制提示词+字幕列表</button>
+          <button id="btnDoc2">⬇ 存成文件</button>
+        </div>
+        <div class="hint">第 3 步 · 把 AI 回复的序号粘贴到这里（整段回复直接粘进来也行）：</div>
+        <textarea id="aiSeqBox" style="min-height:72px"
+          placeholder="例如：8,9,10,12,13,19,21&#10;AI 给了多组方案时，只粘贴你想要的那一组"></textarea>
+        <div class="btnRow" style="margin-top:8px">
+          <button id="btnApplySeq" class="primary">✅ 按序号载入预选（保持 AI 排的顺序）</button>
+        </div>
+        <div class="statusLine" id="aiSeqStatus"></div>
       </div>
+
+      <details id="apiDetails">
+        <summary>⚡ 有接口？点这里直连 AI 自动生成（需先在「接口设置」里配置）</summary>
+        <div class="btnRow" style="margin-top:10px">
+          <button id="btnGen" class="primary">✨ AI 生成方案</button>
+        </div>
+        <div class="statusLine" id="aiStatus"></div>
+      </details>
       <div id="plansList"></div>
     </section>
   </main>
@@ -290,6 +316,9 @@
       <div class="opt" data-m="base">标准版<div class="d">whisper-base · 约80MB 更准</div></div>
     </div>
   </div>
+  <label style="display:flex;align-items:center;gap:8px;margin:2px 0 14px;font-size:14px;color:var(--sub);cursor:pointer">
+    <input type="checkbox" id="aiFixChk" style="width:auto;margin:0"> 识别后用 AI 自动纠正错别字（推荐，需已配置接口）
+  </label>
   <div class="fld">
     <label>离线模型包（网络下载不了模型时的终极方案，只需导入一次）</label>
     <button id="btnModelDl" style="width:100%">📥 一键下载安装（推荐：约27MB，自动完成）</button>
@@ -386,6 +415,9 @@ if (!profiles || !Array.isArray(profiles.list) || !profiles.list.length) {
 const saveProfiles = () => store.set('sc_profiles', profiles);
 const prof = () => profiles.list[Math.min(profiles.active, profiles.list.length - 1)];
 const whisperTier = { get: () => store.get('sc_whisper', 'tiny'), set: v => store.set('sc_whisper', v) };
+const aiFix = { get: () => store.get('sc_ai_fix', '1') === '1', set: v => store.set('sc_ai_fix', v ? '1' : '0') };
+$('aiFixChk').checked = aiFix.get();
+$('aiFixChk').onchange = e => aiFix.set(e.target.checked);
 
 /* ================= Toast ================= */
 let toastTimer = null;
@@ -729,7 +761,7 @@ function renderPicks() {
   } else wrap.style.display = 'none';
   const box = $('picksList');
   if (!S.picks.length) {
-    box.innerHTML = '<div class="hint" style="padding:16px 6px">预选为空：去「字幕素材」点 ＋ 添加，或到「AI方案」让 AI 自动挑段。</div>';
+    box.innerHTML = '<div class="hint" style="padding:16px 6px">预选为空：去「字幕素材」点 ＋ 添加，或到「AI选段」复制提示词给豆包/DeepSeek，把序号粘回来自动挑段。</div>';
     return;
   }
   box.innerHTML = S.picks.map((id, i) => {
@@ -778,12 +810,26 @@ $('btnExportPicks').onclick = () => {
 };
 
 /* ================= AI 方案 ================= */
-const DEFAULT_PROMPT = '请从字幕中挑出最适合做带货短视频的片段：给我 5 个方案，每个方案 10 段左右，优先保留产品卖点、价格优惠、使用效果相关的内容，去掉寒暄和重复。';
+const BUILTIN_TPLS = [
+  {
+    name: '爆款节奏版（推荐）', builtin: true,
+    text: '你是带货短视频剪辑师。请从下面的字幕列表中，挑出最适合做一条爆款带货短视频的片段：\n1. 选 8~15 段，总时长控制在 30~60 秒；\n2. 优先保留：产品卖点、价格优惠、使用效果、催单话术，去掉寒暄、重复和跑题内容；\n3. 片段顺序按成片播放效果排列，可以打乱原时间顺序——开头 3 秒必须有钩子（价格冲击 / 痛点 / 悬念），中间放卖点和使用效果，结尾催单。'
+  },
+  {
+    name: 'FABE 卖点版', builtin: true,
+    text: '你是带货短视频剪辑师。请按 FABE 法则从下面的字幕列表中挑选片段，组成一条带货短视频：\n1. F（特征）：产品是什么、有什么特点；A（优势）：比别家好在哪；B（利益）：对买家有什么好处；E（证据）：效果展示、资质证明、销量见证；\n2. 选 8~15 段，四个环节尽量都覆盖，片段顺序按 F→A→B→E 的逻辑排列，不必按原时间顺序；\n3. 去掉寒暄、重复和无关内容。'
+  },
+  {
+    name: '多方案对比版', builtin: true,
+    text: '请从字幕中挑出最适合做带货短视频的片段：给我 5 个方案，每个方案 10 段左右，优先保留产品卖点、价格优惠、使用效果相关的内容，去掉寒暄和重复。'
+  },
+];
+const DEFAULT_PROMPT = BUILTIN_TPLS[0].text;
 const SYS_PROMPT = `你是带货视频剪辑助手。用户会给你一份带时间轴的字幕列表，格式为 [序号] 开始秒-结束秒|文本。
 请根据用户的要求，从字幕中挑选片段组成若干套剪辑方案。
 硬性要求：
 1. 严格按用户要求里的方案数量和每套片段数量执行；数量是硬指标，输出前先数一遍每套 ids 的个数，确认无误再输出。
-2. 若用户未说明，默认给出 5 个方案；每套方案 5~60 段；每套方案内片段按字幕时间先后顺序排列。
+2. 若用户未说明，默认给出 5 个方案；每套方案 5~60 段；每套方案内片段按最适合成片播放的顺序排列（可打破字幕时间先后，让开头更抓人）。
 3. 严禁几乎全选：单套方案选中条数不得超过字幕总条数的 60%。
 4. 只输出 JSON，不要输出任何解释或标记：{"plans":[{"title":"方案标题","reason":"选段思路","ids":[1,2,3]}]}`;
 const promptBox = $('promptBox');
@@ -791,8 +837,49 @@ promptBox.value = store.get('sc_prompt', DEFAULT_PROMPT);
 let promptSaveT = null;
 promptBox.addEventListener('input', () => {
   clearTimeout(promptSaveT);
-  promptSaveT = setTimeout(() => store.set('sc_prompt', promptBox.value), 400);
+  promptSaveT = setTimeout(() => { store.set('sc_prompt', promptBox.value); renderTplSel(); }, 400);
 });
+
+/* ---- 提示词模板（内置带货模板 + 自定义保存，借鉴沸点的提示词库） ---- */
+function customTpls() { try { const a = JSON.parse(store.get('sc_tpls', '[]')); return Array.isArray(a) ? a : []; } catch { return []; } }
+function allTpls() { return [...BUILTIN_TPLS, ...customTpls()]; }
+function renderTplSel() {
+  const list = allTpls(), cur = promptBox.value.trim();
+  $('tplSel').innerHTML = '<option value="">✏️ 自定义提示词</option>'
+    + list.map((t, i) => `<option value="${i}">${esc(t.name)}${t.builtin ? '' : '（我的）'}</option>`).join('');
+  const idx = list.findIndex(t => t.text.trim() === cur);
+  $('tplSel').value = idx >= 0 ? String(idx) : '';
+  $('btnTplDel').style.display = (idx >= 0 && !list[idx].builtin) ? '' : 'none';
+}
+$('tplSel').onchange = () => {
+  const v = $('tplSel').value;
+  if (v === '') return;
+  const t = allTpls()[+v];
+  if (!t) return;
+  promptBox.value = t.text; store.set('sc_prompt', t.text);
+  renderTplSel();
+  toast(`已套用模板「${t.name}」`);
+};
+$('btnTplSave').onclick = () => {
+  const text = promptBox.value.trim();
+  if (!text) return toast('提示词为空，无法保存');
+  const name = (window.prompt('给这个提示词模板起个名字：', '') || '').trim();
+  if (!name) return;
+  const arr = customTpls();
+  const old = arr.findIndex(t => t.name === name);
+  if (old >= 0) arr[old].text = text; else arr.push({ name, text });
+  store.set('sc_tpls', JSON.stringify(arr));
+  renderTplSel();
+  toast(old >= 0 ? '已更新同名模板' : '模板已保存，以后可直接套用');
+};
+$('btnTplDel').onclick = () => {
+  const t = allTpls()[+$('tplSel').value];
+  if (!t || t.builtin) return;
+  store.set('sc_tpls', JSON.stringify(customTpls().filter(x => x.name !== t.name)));
+  renderTplSel();
+  toast(`已删除模板「${t.name}」`);
+};
+renderTplSel();
 function compactSubs() {
   return S.subs.map(s => `[${s.id}] ${s.start.toFixed(1)}-${s.end.toFixed(1)}|${s.text}`).join('\n');
 }
@@ -904,7 +991,7 @@ function sanitizePlans(plans) {
       const id = parseInt(x, 10);
       if (id && subById(id) && !seen.has(id)) { seen.add(id); ids.push(id); }
     }
-    ids.sort((a, b) => subById(a).start - subById(b).start);   // 按时间排序
+    // 保留 AI 给的顺序（爆款节奏靠乱序编排），不再强制按时间排序
     if (ids.length) out.push({ title: String(p.title || '剪辑方案'), reason: String(p.reason || ''), ids });
   }
   return out;
@@ -929,21 +1016,56 @@ function loadPlan(i, jump) {
   if (jump) switchTab('picks');
   toast(`已载入「方案${i + 1}」：${p.ids.length} 段`);
 }
+/* 桥接模式的复制文本：提示词 + 输出格式要求 + 字幕列表（免接口，给外部 AI 用） */
+function bridgeCopyText() {
+  return promptBox.value.trim()
+    + '\n\n【输出要求】只输出一行你选中的字幕序号，用英文逗号分隔，按成片播放顺序排列，不要输出任何解释或其他内容。例如：8,9,10,12,13,19,21'
+    + '\n\n字幕列表：\n' + compactSubs();
+}
 $('btnCopyAll').onclick = async () => {
   if (!S.subs.length) return toast('请先识别或导入字幕');
-  const text = fullPromptText();
+  const text = bridgeCopyText();
   try {
     await navigator.clipboard.writeText(text);
-    toast('已复制到剪贴板，可粘贴到任意 AI 使用');
+    toast('已复制！打开手机里的豆包/DeepSeek/Kimi粘贴发送');
   } catch {
     try {
       const ta = document.createElement('textarea');
       ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
       document.body.appendChild(ta); ta.select();
       document.execCommand('copy'); ta.remove();
-      toast('已复制到剪贴板，可粘贴到任意 AI 使用');
-    } catch { toast('复制失败，请改用「⬇ 文档」下载'); }
+      toast('已复制！打开手机里的豆包/DeepSeek/Kimi粘贴发送');
+    } catch { toast('复制失败，请改用「⬇ 存成文件」'); }
   }
+};
+
+/* ---- 粘贴 AI 返回的序号 → 按 AI 顺序载入预选（沸点模式，免接口） ---- */
+function parseAiSeq(raw) {
+  // 找出文本中所有"数字串"（允许逗号/顿号/空格分隔），取最长的一串，保留顺序
+  const runs = raw.match(/\d+(?:\s*[,，、\s]\s*\d+)*/g) || [];
+  let best = [];
+  for (const r of runs) {
+    const nums = r.match(/\d+/g) || [];
+    if (nums.length > best.length) best = nums;
+  }
+  const seen = new Set(), ids = [];
+  for (const t of best) {
+    const id = parseInt(t, 10);
+    if (id && subById(id) && !seen.has(id)) { seen.add(id); ids.push(id); }
+  }
+  return ids;
+}
+$('btnApplySeq').onclick = () => {
+  if (!S.subs.length) return toast('请先识别或导入字幕');
+  const raw = $('aiSeqBox').value.trim();
+  if (!raw) return toast('请先粘贴 AI 返回的序号');
+  const ids = parseAiSeq(raw);
+  if (!ids.length) return toast('没有识别到有效序号，请检查粘贴的内容');
+  S.picks = ids;   // 顺序 = AI 给的顺序，导出即按此拼接
+  renderPicks(); renderSubs();
+  $('aiSeqStatus').textContent = `已载入 ${ids.length} 段（保持 AI 排的顺序）：${ids.join(',')}`;
+  switchTab('picks');
+  toast(`已按 AI 顺序载入 ${ids.length} 段，可在列表里微调后导出`);
 };
 function downloadDoc() {
   if (!S.subs.length) return toast('请先识别或导入字幕');
@@ -1277,6 +1399,36 @@ async function loadWhisper(modelId, onDlProgress) {
   err.stage = 'model';
   throw err;
 }
+/* 识别后 AI 纠错：修正同音错别字（回够率→回购率 等），时间轴不变；失败静默保留原文 */
+const AI_FIX_SYS = '你是字幕纠错助手。用户会给你一组语音识别生成的直播带货字幕（JSON数组），其中存在大量同音错别字，例如：回够率→回购率、保温倍→保温杯、酷存→库存、宋外卖→送外卖、只不见→直播间。请根据上下文纠正错别字和明显误字，保持每条的原意、顺序和条数完全不变，不合并、不拆分、不解释、不翻译。严格只输出 JSON：{"texts":["第1条修正后文本","第2条修正后文本"]}';
+async function correctSubsWithAI(subs) {
+  if (!aiFix.get() || !subs.length) return false;
+  const p = prof();
+  if (!p || !p.url || !p.key || !p.model) return false;
+  const base = p.url.replace(/\/+$/, '');
+  const endpoint = /\/chat\/completions$/.test(base) ? base : base + '/chat/completions';
+  const resp = await withTimeout(fetch(endpoint, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + p.key },
+    body: JSON.stringify({
+      model: p.model,
+      messages: [
+        { role: 'system', content: AI_FIX_SYS },
+        { role: 'user', content: JSON.stringify(subs.map(s => s.text)) },
+      ],
+    }),
+  }), 60e3, 'AI 校正超时');
+  if (!resp.ok) throw new Error('HTTP ' + resp.status);
+  const j = await resp.json();
+  const full = j && j.choices && j.choices[0] && j.choices[0].message && j.choices[0].message.content || '';
+  const a = full.indexOf('{'), z = full.lastIndexOf('}');
+  if (a < 0 || z <= a) return false;
+  let texts;
+  try { texts = JSON.parse(full.slice(a, z + 1)).texts; } catch { return false; }
+  if (!Array.isArray(texts) || texts.length !== subs.length) return false;   // 条数对不上则整体放弃，防止错位
+  subs.forEach((s, i) => { const t = String(texts[i] || '').trim(); if (t) s.text = t; });
+  return true;
+}
 async function runASR() {
   if (taskGuard()) return;
   S.busy = 'asr'; asrAborted = false;
@@ -1318,6 +1470,7 @@ async function runASR() {
         stride_length_s: 5,
         language: 'chinese',
         return_timestamps: true,
+        initial_prompt: '以下是简体中文直播带货口播，内容涉及产品卖点、价格优惠、库存、下单，用词口语化。',
       });
     } catch (e) { e.stage = 'infer'; throw e; }
     finally { clearInterval(tick); }
@@ -1328,9 +1481,15 @@ async function runASR() {
       const e = new Error('没有识别到有效语音内容');
       e.stage = 'infer'; throw e;
     }
+    // 5) AI 校正错别字（几秒、几分钱；时间轴不变；未配置接口自动跳过）
+    let fixed = false;
+    const willFix = aiFix.get() && prof() && prof().url && prof().key && prof().model;
+    if (willFix) mask.set(0.97, 'AI 正在校正错别字…');
+    try { fixed = await correctSubsWithAI(subs); } catch (e) { console.warn('AI 校正跳过', e); }
+    if (asrAborted) return;
     S.busy = null;
     mask.set(1, '完成');
-    setTimeout(() => { mask.close(); setSubs(subs, `识别完成，共 ${subs.length} 条字幕`); switchTab('subs'); }, 350);
+    setTimeout(() => { mask.close(); setSubs(subs, `识别完成，共 ${subs.length} 条字幕${fixed ? '（AI 已校正错别字）' : ''}`); switchTab('subs'); }, 350);
   } catch (e) {
     if (asrAborted) return;
     S.busy = null;
