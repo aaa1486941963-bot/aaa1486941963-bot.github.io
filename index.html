@@ -87,7 +87,8 @@
   #sheetMask{position:fixed;inset:0;z-index:40;background:rgba(0,0,0,.55);display:none;}
   #sheet{position:fixed;left:0;right:0;bottom:0;z-index:41;background:var(--card);
     border-radius:18px 18px 0 0;border-top:1px solid var(--line);padding:18px 16px calc(18px + env(safe-area-inset-bottom));
-    transform:translateY(105%);transition:transform .28s ease;max-width:640px;margin:0 auto;}
+    transform:translateY(105%);transition:transform .28s ease;max-width:640px;margin:0 auto;
+    max-height:86vh;max-height:86dvh;overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;}
   #sheet.show{transform:translateY(0);}
   #sheet h3{margin:0 0 12px;font-size:17px;}
   .fld{margin-bottom:12px;}
@@ -940,6 +941,10 @@ async function loadFFmpeg() {
   return ffLoading;
 }
 function resetFFmpeg() { ff = null; ffLoading = null; }
+/* 带超时的等待：超时即丢弃引擎实例并抛出明确错误，避免 WASM 假死/网络停滞导致无限转圈 */
+function withTimeout(p, ms, msg) {
+  return Promise.race([p, new Promise((_, rej) => setTimeout(() => { resetFFmpeg(); rej(new Error(msg)); }, ms))]);
+}
 /* ff.run 安全包装：0.11.6 中命令一旦失败，实例会永久"假忙"（之后所有 run 都报
    can only run one command at a time），失败即丢弃实例，下次操作自动加载全新引擎 */
 async function ffRunSafe(...args) {
@@ -963,7 +968,7 @@ async function extractAudio16k(blob) {
     if (!AC) throw new Error('no AudioContext');
     const ctx = new AC();
     try { await ctx.resume(); } catch { }
-    const ab = await new Promise((res, rej) => {
+    const ab = await withTimeout(new Promise((res, rej) => {   // 个别浏览器解码会假死，限时后走引擎兜底
       let settled = false;
       const ok = v => { if (!settled) { settled = true; res(v); } };
       const bad = e => { if (!settled) { settled = true; rej(e || new Error('decode failed')); } };
@@ -971,23 +976,26 @@ async function extractAudio16k(blob) {
         const p = ctx.decodeAudioData(buf, ok, bad);
         if (p && p.then) p.then(ok, bad);
       } catch (e) { bad(e); }
-    });
+    }), 90e3, '浏览器直读超时');
     const OAC = window.OfflineAudioContext || window.webkitOfflineAudioContext;
     const frames = Math.max(16000, Math.ceil(ab.duration * 16000));
     const off = new OAC(1, frames, 16000);
     const s = off.createBufferSource();
     s.buffer = ab; s.connect(off.destination); s.start();
-    const rendered = await off.startRendering();
+    const rendered = await withTimeout(off.startRendering(), 120e3, '浏览器重采样超时');
     try { ctx.close(); } catch { }
     return rendered.getChannelData(0).slice();   // 16kHz 单声道 Float32Array
   } catch (e) {
     console.warn('浏览器原生音频解码失败，改用引擎提取', e);
-    mask.set(0.02, '浏览器直读失败，改用引擎提取音频…');
-    await loadFFmpeg();
+    mask.set(0.02, '浏览器直读失败，正在加载提取引擎（约30MB，仅首次）…');
+    await withTimeout(loadFFmpeg(), 240e3, '提取引擎加载超时（约30MB）：请换 Wi-Fi 或信号好的网络后重试');
+    mask.set(0.03, '引擎就绪，正在读入视频…');
     const src = 'src' + videoExt(S.videoName);
-    ff.FS('writeFile', src, await FFmpeg.fetchFile(blob));
+    ff.FS('writeFile', src, await withTimeout(FFmpeg.fetchFile(blob), 120e3, '读入视频超时：视频文件太大，建议 5 分钟以内的视频'));
+    mask.set(0.04, '正在用引擎提取音频…');
     try {
-      await ffRunSafe('-i', src, '-vn', '-ac', '1', '-ar', '16000', '-f', 'f32le', '-acodec', 'pcm_f32le', 'audio.pcm');
+      await withTimeout(ffRunSafe('-i', src, '-vn', '-ac', '1', '-ar', '16000', '-f', 'f32le', '-acodec', 'pcm_f32le', 'audio.pcm'),
+        150e3, '提取音频超时：视频过大或格式不兼容（如 H.265），建议换成 5 分钟以内的 H.264 MP4');
       const pcm = ff.FS('readFile', 'audio.pcm');
       const usable = pcm.byteLength - (pcm.byteLength % 4);
       return new Float32Array(pcm.buffer.slice(pcm.byteOffset, pcm.byteOffset + usable));
